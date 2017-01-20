@@ -1,16 +1,56 @@
 #!/usr/bin/env python3.5
 
-import sys
 import pdb
-import json
 import random
-import cProfile
-import itertools
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 
 random.seed(42)
+
+
+class TestGeneric(object):
+    numpy = 1  # nosetests attribute, use nosetests -a 'not numpy' to skip test
+
+    @classmethod
+    def setupClass(cls):
+        global numpy
+        try:
+            import numpy
+        except ImportError:
+            raise SkipTest('numpy not available.')
+
+    def setUp(self):
+        self.Gp2 = nx.path_graph(2)
+        self.Gp3 = nx.path_graph(3)
+        self.Gp4 = nx.path_graph(4)
+        self.Gp5 = nx.path_graph(5)
+        self.Gc3 = nx.cycle_graph(3)
+        self.Gi = nx.cycle_graph(3)
+        self.Gi.add_edge(2, 3)
+        self.Gc4 = nx.cycle_graph(4)
+        self.Gg10 = nx.grid_2d_graph(10, 10)
+
+    def launchTest(self):
+        self.posGp2, self.qualGp2 = spat_force_atlas_2(self.Gp2)
+        self.posGp3, self.qualGp3 = spat_force_atlas_2(self.Gp3)
+        self.posGp4, self.qualGp4 = spat_force_atlas_2(self.Gp4)
+        self.posGp5, self.qualGp5 = spat_force_atlas_2(self.Gp5)
+        self.posGc3, self.qualGc3 = spat_force_atlas_2(self.Gc3)
+        self.posGc3_2fixed,\
+            self.qualGc3_2fixed = spat_force_atlas_2(self.Gc3,
+                                                     pos={0: [0, 400],
+                                                          1: [0, -400],
+                                                          2: [3000, 0]},
+                                                     fixed=[0, 1])
+        self.posGi, self.qualGi = spat_force_atlas_2(self.Gc3,
+                                                     pos={0: [0, 400],
+                                                          1: [0, -400],
+                                                          2: [693, 0],
+                                                          3: [-693, 0]},
+                                                     fixed=[0, 1, 2])
+        self.posGc4, self.qualGc4 = spat_force_atlas_2(self.Gc4)
+        self.posGg10, self.qualGg10 = spat_force_atlas_2(self.Gg10)
 
 
 def spat_force_atlas_2(G, pos=None, fixed=None, size=None, gravity=1,
@@ -24,12 +64,16 @@ def spat_force_atlas_2(G, pos=None, fixed=None, size=None, gravity=1,
 
     weight = np.array(nx.to_numpy_matrix(G, nodelist=sorted_nodes,
                                          weight='weight'))
-    weight = weight**edge_weight_influence
+    weight **= edge_weight_influence
     adjacency = np.where(weight, 1, 0)
     dissuade = (1 + np.sum(adjacency, axis=1)).reshape((num_nodes, 1)) @ ones.T
     degree = dissuade * (ones @
                          (1 +
                           np.sum(adjacency, axis=1)).reshape((1, num_nodes)))
+    x = np.array([[pos[node][0]
+                   if pos and node in pos and pos[node][0]
+                   else random.random() * num_nodes
+                   for node in sorted_nodes]]).reshape((num_nodes, 1))
     y = np.array([[pos[node][1]
                    if pos and node in pos and pos[node][1]
                    else random.random() * num_nodes
@@ -73,7 +117,7 @@ def spacialization(sorted_nodes, x, y, adjacency, iterations, get_force):
         if i != iterations:
             x = x_2
             y = y_2
-            if max(map(np.max, [δx * α, δy * α])) < 1:
+            if max(map(np.max, [δx * α, δy * α])) < 0.01:
                 break
         i += 1
     return {sorted_nodes[i]: [x[i][0], y[i][0]] for i in range(len(x))},\

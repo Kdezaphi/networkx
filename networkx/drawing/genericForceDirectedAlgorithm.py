@@ -1,124 +1,221 @@
-#!/usr/bin/env python3.5
+#!/usr/bin/env python3.6
+# -*- coding: utf-8 -*-
 
-import pdb
 import random
 import numpy as np
 import networkx as nx
-import matplotlib.pyplot as plt
-
-random.seed(42)
 
 
-class TestGeneric(object):
-    numpy = 1  # nosetests attribute, use nosetests -a 'not numpy' to skip test
+def _process_params(G, center, dim):
+    # Some boilerplate code.
+    import numpy as np
 
-    @classmethod
-    def setupClass(cls):
-        global numpy
-        try:
-            import numpy
-        except ImportError:
-            raise SkipTest('numpy not available.')
+    if not isinstance(G, nx.Graph):
+        empty_graph = nx.Graph()
+        empty_graph.add_nodes_from(G)
+        G = empty_graph
 
-    def setUp(self):
-        self.Gp2 = nx.path_graph(2)
-        self.Gp3 = nx.path_graph(3)
-        self.Gp4 = nx.path_graph(4)
-        self.Gp5 = nx.path_graph(5)
-        self.Gc3 = nx.cycle_graph(3)
-        self.Gi = nx.cycle_graph(3)
-        self.Gi.add_edge(2, 3)
-        self.Gc4 = nx.cycle_graph(4)
-        self.Gg10 = nx.grid_2d_graph(10, 10)
+    if center is None:
+        center = np.zeros(dim)
+    else:
+        center = np.asarray(center)
 
-    def launchTest(self):
-        self.posGp2, self.qualGp2 = spat_force_atlas_2(self.Gp2)
-        self.posGp3, self.qualGp3 = spat_force_atlas_2(self.Gp3)
-        self.posGp4, self.qualGp4 = spat_force_atlas_2(self.Gp4)
-        self.posGp5, self.qualGp5 = spat_force_atlas_2(self.Gp5)
-        self.posGc3, self.qualGc3 = spat_force_atlas_2(self.Gc3)
-        self.posGc3_2fixed,\
-            self.qualGc3_2fixed = spat_force_atlas_2(self.Gc3,
-                                                     pos={0: [0, 400],
-                                                          1: [0, -400],
-                                                          2: [3000, 0]},
-                                                     fixed=[0, 1])
-        self.posGi, self.qualGi = spat_force_atlas_2(self.Gc3,
-                                                     pos={0: [0, 400],
-                                                          1: [0, -400],
-                                                          2: [693, 0],
-                                                          3: [-693, 0]},
-                                                     fixed=[0, 1, 2])
-        self.posGc4, self.qualGc4 = spat_force_atlas_2(self.Gc4)
-        self.posGg10, self.qualGg10 = spat_force_atlas_2(self.Gg10)
+    if len(center) != dim:
+        msg = "length of center coordinates must match dimension of layout"
+        raise ValueError(msg)
+
+    return G, center
 
 
-def spat_force_atlas_2(G, pos=None, fixed=None, size=None, gravity=1,
-                       strong_gravity=False, scaling_ratio=50,
-                       edge_weight_influence=1, log_attraction=False,
-                       dissuade_hubs=False, anti_collision=False,
-                       center=[0, 0], iterations=2000):
-    sorted_nodes = sorted(G)
+def spat_force_atlas_2(G, k=0, g=1,
+                       strong_gravity=False,
+                       edge_weight_influence=1,
+                       log_attraction=False,
+                       dissuade_hubs=False,
+                       pos=None,
+                       fixed=None,
+                       iterations=np.inf,
+                       displacement_min=1,
+                       weight='weight',
+                       scale=1.0,
+                       center=None,
+                       dim=2):
+    """Position nodes using Force Atlas 2 force-directed algorithm.
+
+    Parameters
+    ----------
+    G : NetworkX graph or list of nodes
+
+    k : float  optional (default=2 beyond 100 nodes else 10)
+        Scalar to adjust repulsion force. The more it is, the more
+        the repulsion is stronger.
+
+    g : float  optional (default=1)
+        Scalar to adjust gravity force. The more it is, the more nodes
+        are attracted to the center.
+
+    strong_gravity : boolean  optional (default=False)
+        Attract more the nodes that are distant frmo the center by removing
+        the division by the distance.
+
+    edge_weight_influence : float  optional (default=1)
+        If the edges are weighted, power the edges by this value.
+
+    log_attraction : boolean  optional (default=False)
+        Use logarithm attraction force instead of proportionnal.
+
+    dissuade_hubs : boolean  optional (default=False)
+        Divide the attraction by the degree plus one
+        for nodes it point to.
+
+    pos : dict or None  optional (default=None)
+        Initial positions for nodes as a dictionary with node as keys
+        and values as a coordinate list or tuple.  If None, then use
+        random initial positions.
+
+    fixed : list or None  optional (default=None)
+        Nodes to keep fixed at initial position.
+
+    iterations : int  optional (default=inf)
+        Number of maximum iterations. The algorithm stop when the
+        maximum displacement is under displacement_min or when the
+        number of iterations is reach.
+
+    displacement_min : float  optional (default=0.1)
+        Scalar to set the minimum displacement of the maximum displacement
+        to stop the algorithm.
+
+    weight : string or None   optional (default='weight')
+        The edge attribute that holds the numerical value used for
+        the edge weight.  If None, then all edge weights are 1.
+
+    scale : float  optional (default=1.0)
+        Scale factor for positions. The nodes are positioned
+        in a box of size [-scale, scale] x [-scale, scale].
+
+    center : array-like or None  optional
+        Coordinate pair around which to center the layout.
+
+    dim : int  optional (default=2)
+        Dimension of layout
+
+    Returns
+    -------
+    pos : dict
+        A dictionary of positions keyed by node
+
+    Examples
+    --------
+    >>> G = nx.path_graph(4)
+    >>> pos = nx.spat_force_atlas_2(G)
+    """
+    G, center = _process_params(G, center, dim)
     num_nodes = len(G)
-    ones = np.ones((len(G), 1))
+    if num_nodes > 1:
+        if not k:
+            k = 2 if num_nodes > 100 else 10
+        ones = np.ones((num_nodes, 1))
 
-    weight = np.array(nx.to_numpy_matrix(G, nodelist=sorted_nodes,
-                                         weight='weight'))
-    weight **= edge_weight_influence
-    adjacency = np.where(weight, 1, 0)
-    dissuade = (1 + np.sum(adjacency, axis=1)).reshape((num_nodes, 1)) @ ones.T
-    degree = dissuade * (ones @
-                         (1 +
-                          np.sum(adjacency, axis=1)).reshape((1, num_nodes)))
-    x = np.array([[pos[node][0]
-                   if pos and node in pos and pos[node][0]
-                   else random.random() * num_nodes
-                   for node in sorted_nodes]]).reshape((num_nodes, 1))
-    y = np.array([[pos[node][1]
-                   if pos and node in pos and pos[node][1]
-                   else random.random() * num_nodes
-                   for node in sorted_nodes]]).reshape((num_nodes, 1))
+        movable = np.array([[1] if not fixed or node not in fixed else [0]
+                            for node in G])
 
-    def force_atlas_2(distance):
-        np.set_printoptions(precision=3)
-        return np.where(distance > 0.1, scaling_ratio * degree / distance,
-                        scaling_ratio * degree / 0.1) - distance * weight
-    return spacialization(sorted_nodes, x, y, adjacency, iterations,
-                          force_atlas_2)
+        coord = np.array([pos[node] if pos and node in pos and any(pos[node])
+                          else [random.random() * num_nodes
+                          for i in range(dim)] for node in G])
+
+        weight = np.asarray(nx.to_numpy_matrix(G, weight=weight))
+        weight **= edge_weight_influence
+        adjacency = np.where(weight, 1, 0)
+        dissuade = (1 + np.sum(adjacency, axis=1)).reshape((num_nodes, 1)) @\
+            ones.T
+        degree = np.vstack(((1 + np.sum(adjacency, 1)),
+                            dissuade *
+                            (ones @ (1 + np.sum(adjacency,
+                                                1)).reshape((1, num_nodes)))))
+        degree[1:] = k * degree[1:]
+
+        def force_atlas_2(distance, Δ_norm):
+            f_gravity = degree[0]
+            if not strong_gravity:
+                f_gravity /= distance[0]
+            f_gravity = f_gravity.reshape((num_nodes, 1)) * Δ_norm[0]
+
+            f_repulsion = degree[1:] / distance[1:]
+            f_repulsion = f_repulsion.reshape((num_nodes, num_nodes, 1)) *\
+                Δ_norm[1:]
+
+            if log_attraction:
+                f_attraction = np.log(distance[1:])
+            else:
+                f_attraction = distance[1:] * weight
+            if dissuade_hubs:
+                f_attraction /= dissuade
+            f_attraction = f_attraction.reshape((num_nodes, num_nodes, 1)) *\
+                Δ_norm[1:]
+
+            return np.sum(f_attraction, axis=1) -\
+                np.sum(f_repulsion, axis=1) +\
+                f_gravity
+
+        return spacialization(G, coord, adjacency, movable, displacement_min,
+                              iterations, force_atlas_2, center, scale, dim)
+    return {}
 
 
-def spacialization(sorted_nodes, x, y, adjacency, iterations, get_force):
-    ones = np.ones((len(x), 1))
+def spacialization(G, coord, adjacency, movable, displacement_min, iterations,
+                   get_force, center, scale, dim):
+
+    num_nodes = G.number_of_nodes()
+    Δ = np.vstack([[coord]] * num_nodes) -\
+        np.transpose(np.vstack(([[coord]] * num_nodes)), (1, 0, 2))
+    dist = np.linalg.norm(Δ, axis=2)
+    dist = np.where(dist < 0.01, 0.01, dist)
     Q = np.inf
-    α = len(x)
+    α = 1
     i = 0
-    qualityGraph = []
-    while i < iterations:
-        Δx = (x @ ones.T) - (ones @ x.T)
-        Δy = (y @ ones.T) - (ones @ y.T)
-        dist = Δx**2 + Δy**2
-        f = get_force(np.sqrt(dist))
-        δx = np.sum(Δx * f, axis=1).reshape((len(x), 1))
-        δy = np.sum(Δy * f, axis=1).reshape((len(x), 1))
-        while i < iterations:
-            x_2 = x + α * δx
-            y_2 = y + α * δy
-            Δx_2 = (x_2 @ ones.T) - (ones @ x_2.T)
-            Δy_2 = (y_2 @ ones.T) - (ones @ y_2.T)
-            dist_2 = np.sqrt(Δx_2**2 + Δy_2**2)
+    while True and i < iterations:
+        Δ = np.vstack((np.array([center - coord]),
+                       np.vstack([[coord]] * num_nodes) -
+                       np.transpose(np.vstack(([[coord]] * num_nodes)),
+                                    (1, 0, 2))))
+        dist = np.linalg.norm(Δ, axis=2)
+        dist = np.where(dist < 0.01, 0.01, dist)
+        Δ_norm = Δ / dist.reshape((num_nodes + 1, num_nodes, 1))
+        δ = get_force(dist, Δ_norm) * movable
+        while True and i < iterations:
+            coord_2 = coord + δ * α
+            Δ_2 = np.vstack([[coord_2]] * num_nodes) -\
+                np.transpose(np.vstack(([[coord_2]] * num_nodes)), (1, 0, 2))
+            dist_2 = np.linalg.norm(Δ_2, axis=2)
+            dist_2 = np.where(dist_2 < 0.01, 0.01, dist_2)
             Q_2 = np.sum(dist_2 * adjacency) / np.sum(dist_2)
             if Q_2 < Q:
-                qualityGraph.append(Q_2)
                 Q = Q_2
+                coord = coord_2
+                print('update quality {}: {}'.format(i, max(map(np.max,
+                                                                map(np.abs,
+                                                                    δ * α)))))
                 break
-            qualityGraph.append(Q_2)
+            if max(map(np.max, map(np.abs, δ * α))) <= displacement_min:
+                break
+            print('displacement_max {}: {}'.format(i, max(map(np.max,
+                                                              map(np.abs,
+                                                                  δ * α)))))
             i += 1
             α /= 2
-        if i != iterations:
-            x = x_2
-            y = y_2
-            if max(map(np.max, [δx * α, δy * α])) < 0.01:
-                break
+        # print('displacement_max {}: {}'.format(i, max(map(np.max,
+        #                                                   map(np.abs,
+        #                                                       δ * α)))))
         i += 1
-    return {sorted_nodes[i]: [x[i][0], y[i][0]] for i in range(len(x))},\
-        qualityGraph
+        if max(map(np.max, map(np.abs, δ * α))) <= displacement_min:
+            break
+    if len(coord) > 1:
+        coord_max = np.array([max(coord[:, i]) for i in range(dim)])
+        coord_diff = np.array([coord_max[i] - min(coord[:, i])
+                               for i in range(dim)])
+        coord = (coord + coord_diff - coord_max) / max(coord_diff) *\
+            scale + center
+        pos = dict(zip(G, coord))
+    elif len(G) == 1:
+        pos = {node: center for node in G}
+    return pos

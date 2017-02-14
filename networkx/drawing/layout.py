@@ -34,7 +34,9 @@ __all__ = ['circular_layout',
            'shell_layout',
            'spring_layout',
            'spectral_layout',
-           'fruchterman_reingold_layout']
+           'fruchterman_reingold_layout',
+           'force_atlas_2_layout',
+           'spat_fruchterman_reingold_layout']
 
 
 def _process_params(G, center, dim):
@@ -466,6 +468,321 @@ def _sparse_fruchterman_reingold(A, k=None, pos=None, fixed=None,
         # cool temperature
         t -= dt
     return pos
+
+
+def force_atlas_2_layout(G, k=0, g=1,
+                         strong_gravity=False,
+                         edge_weight_influence=1,
+                         log_attraction=False,
+                         dissuade_hubs=False,
+                         pos=None,
+                         fixed=None,
+                         iterations=0,
+                         displacement_min=1,
+                         weight='weight',
+                         scale=1.0,
+                         center=None,
+                         dim=2):
+    """Position nodes using Force Atlas 2 force-directed algorithm.
+
+    Parameters
+    ----------
+    G : NetworkX graph or list of nodes
+
+    k : float  optional (default=2 beyond 100 nodes else 10)
+        Scalar to adjust repulsion force. The more it is, the more
+        the repulsion is stronger.
+
+    g : float  optional (default=1)
+        Scalar to adjust gravity force. The more it is, the more nodes
+        are attracted to the center.
+
+    strong_gravity : boolean  optional (default=False)
+        Attract more the nodes that are distant frmo the center by removing
+        the division by the distance.
+
+    edge_weight_influence : float  optional (default=1)
+        If the edges are weighted, power the edges by this value.
+
+    log_attraction : boolean  optional (default=False)
+        Use logarithm attraction force instead of proportionnal.
+
+    dissuade_hubs : boolean  optional (default=False)
+        Divide the attraction by the degree plus one
+        for nodes it point to.
+
+    pos : dict or None  optional (default=None)
+        Initial positions for nodes as a dictionary with node as keys
+        and values as a coordinate list or tuple.  If None, then use
+        random initial positions.
+
+    fixed : list or None  optional (default=None)
+        Nodes to keep fixed at initial position.
+
+    iterations : int  optional (default=0)
+        Number of maximum iterations. The algorithm stop when the
+        maximum displacement is under displacement_min or when the
+        number of iterations is reach. If it is 0 it is set to np.inf.
+
+    displacement_min : float  optional (default=0.1)
+        Scalar to set the minimum displacement of the maximum displacement
+        to stop the algorithm.
+
+    weight : string or None   optional (default='weight')
+        The edge attribute that holds the numerical value used for
+        the edge weight.  If None, then all edge weights are 1.
+
+    scale : float  optional (default=1.0)
+        Scale factor for positions. The nodes are positioned
+        in a box of size [-scale, scale] x [-scale, scale].
+
+    center : array-like or None  optional
+        Coordinate pair around which to center the layout.
+
+    dim : int  optional (default=2)
+        Dimension of layout
+
+    Returns
+    -------
+    pos : dict
+        A dictionary of positions keyed by node
+
+    Examples
+    --------
+    >>> G = nx.path_graph(4)
+    >>> pos = nx.spat_force_atlas_2(G)
+    """
+    import random
+    import numpy as np
+
+    G, center = _process_params(G, center, dim)
+
+    if iterations == 0:
+        iterations = np.inf
+
+    W = np.asarray(nx.to_numpy_matrix(G, weight=weight))**edge_weight_influence
+
+    A = np.where(W, 1, 0)
+    nnodes, _ = A.shape
+
+    shape = (len(G), dim)
+    if pos is not None:
+        # Determine size of existing domain to adjust initial positions
+        dom_size = max(coord for pos_tup in pos.values() for coord in pos_tup)
+        Pos = np.random.random(shape) * dom_size + center
+        for i, n in enumerate(G):
+            if n in pos:
+                Pos[i] = np.asarray(pos[n])
+    else:
+        Pos = np.random.random(shape) + center
+
+    if len(G) == 0:
+        return {}
+    if len(G) == 1:
+        return {next(G.nodes()): center}
+
+    if not k:
+        k = 2 if nnodes > 100 else 10
+    ones = np.ones((nnodes, 1))
+
+    M = np.array([[1] if not fixed or node not in fixed else [0]
+                  for node in G])
+    Hub = (1 + np.sum(A, axis=1)).reshape((nnodes, 1)) @ ones.T
+    Deg = np.vstack(((1 + np.sum(A, 1)),
+                     Hub * (ones @ (1 + np.sum(A, 1)).reshape((1,
+                                                               nnodes)))))
+    Deg[1:] *= k
+
+    def force_atlas_2(Dis, Δ_norm):
+        f_gra = Deg[0]
+        if not strong_gravity:
+            f_gra /= Dis[0]
+        f_gra = f_gra.reshape((nnodes, 1)) * Δ_norm[0]
+
+        f_rep = Deg[1:] / Dis[1:]
+        f_rep = f_rep.reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
+
+        if log_attraction:
+            f_att = np.log(Dis[1:])
+        else:
+            f_att = Dis[1:] * W
+        if dissuade_hubs:
+            f_att /= Hub
+        f_att = f_att.reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
+
+        return np.sum(f_att, axis=1) - np.sum(f_rep, axis=1) + f_gra
+
+    Pos = _spacialization(A, Pos, M, displacement_min, iterations,
+                          force_atlas_2, center, scale, dim)
+    if fixed is None:
+        Pos = rescale_layout(Pos, scale=scale) + center
+    pos = dict(zip(G, Pos))
+    return pos
+
+
+def spat_fruchterman_reingold_layout(G, k=None,
+                                     pos=None,
+                                     fixed=None,
+                                     iterations=0,
+                                     displacement_min=1,
+                                     weight='weight',
+                                     scale=1.0,
+                                     center=None,
+                                     dim=2):
+    """Position nodes using Fruchterman-Reingold force-directed algorithm.
+
+    Parameters
+    ----------
+    G : NetworkX graph or list of nodes
+
+    k : float (default=None)
+        Optimal distance between nodes.  If None the distance is set to
+        1/sqrt(n) where n is the number of nodes.  Increase this value
+        to move nodes farther apart.
+
+    pos : dict or None  optional (default=None)
+        Initial positions for nodes as a dictionary with node as keys
+        and values as a coordinate list or tuple.  If None, then use
+        random initial positions.
+
+    fixed : list or None  optional (default=None)
+        Nodes to keep fixed at initial position.
+
+    iterations : int  optional (default=0)
+        Number of maximum iterations. The algorithm stop when the
+        maximum displacement is under displacement_min or when the
+        number of iterations is reach. If it is 0 it is set to np.inf.
+
+    displacement_min : float  optional (default=0.1)
+        Scalar to set the minimum displacement of the maximum displacement
+        to stop the algorithm.
+
+    weight : string or None   optional (default='weight')
+        The edge attribute that holds the numerical value used for
+        the edge weight.  If None, then all edge weights are 1.
+
+    scale : float (default=1.0)
+        Scale factor for positions. The nodes are positioned
+        in a box of size [0, scale] x [0, scale].
+
+    center : array-like or None
+        Coordinate pair around which to center the layout.
+
+    dim : int
+        Dimension of layout
+
+    Returns
+    -------
+    pos : dict
+        A dictionary of positions keyed by node
+
+    Examples
+    --------
+    >>> G = nx.path_graph(4)
+    >>> pos = nx.spring_layout(G)
+
+    # The same using longer but equivalent function name
+    >>> pos = nx.fruchterman_reingold_layout(G)
+    """
+    import numpy as np
+
+    G, center = _process_params(G, center, dim)
+
+    if iterations == 0:
+        iterations = np.inf
+
+    M = np.array([[1] if not fixed or node not in fixed else [0]
+                  for node in G])
+
+    shape = (len(G), dim)
+    if pos is not None:
+        # Determine size of existing domain to adjust initial positions
+        dom_size = max(coord for pos_tup in pos.values() for coord in pos_tup)
+        Pos = np.random.random(shape) * dom_size + center
+        for i, n in enumerate(G):
+            if n in pos:
+                Pos[i] = np.asarray(pos[n])
+    else:
+        Pos = np.random.random(shape) + center
+
+    if len(G) == 0:
+        return {}
+    if len(G) == 1:
+        return {next(G.nodes()): center}
+
+    W = np.asarray(nx.to_numpy_matrix(G, weight=weight))
+
+    A = np.where(W, 1, 0)
+    nnodes, _ = A.shape
+
+    if k is None:
+        if fixed is not None:
+            # We must adjust k by domain size for layouts not near 1x1
+            k = dom_size / np.sqrt(nnodes)
+        else:
+            k = np.sqrt(1.0/nnodes)
+
+    def fruchterman_reingold(Dis, Δ_norm):
+        f_rep = (k * k / Dis[1:]**2).reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
+
+        f_att = (W * Dis[1:] / k).reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
+
+        return np.sum(f_att, axis=1) - np.sum(f_rep, axis=1)
+
+    pos = _spacialization(A, Pos, M, displacement_min, iterations,
+                          fruchterman_reingold, center, scale, dim)
+    if fixed is None:
+        pos = rescale_layout(pos, scale=scale) + center
+    pos = dict(zip(G, pos))
+    return pos
+
+
+def _spacialization(A, Pos, M, disp_min, iteration,
+                    get_f, center, scale, dim):
+
+    try:
+        import numpy as np
+    except ImportError:
+        msg = "_spacialization() requires numpy: http://scipy.org/ "
+        raise ImportError(msg)
+
+    try:
+        nnodes, _ = A.shape
+    except AttributeError:
+        msg = "_spacialization() takes an adjacency matrix as input"
+        raise nx.NetworkXError(msg)
+
+    Q = np.inf
+    α = 1
+    i = 0
+    while True and i < iteration:
+        Δ = np.vstack((np.array([Pos]),
+                       np.vstack([[Pos]] * nnodes) -
+                       np.transpose(np.vstack(([[Pos]] * nnodes)), (1, 0, 2))))
+        Dis = np.linalg.norm(Δ, axis=2)
+        Dis = np.where(Dis < 0.01, 0.01, Dis)
+        Δ_norm = Δ / Dis.reshape((nnodes + 1, nnodes, 1))
+        δ = get_f(Dis, Δ_norm) * M
+        while True and i < iteration:
+            i += 1
+            Pos_2 = Pos + δ * α
+            Δ_2 = np.vstack([[Pos_2]] * nnodes) -\
+                np.transpose(np.vstack(([[Pos_2]] * nnodes)), (1, 0, 2))
+            Dis_2 = np.linalg.norm(Δ_2, axis=2)
+            Dis_2 = np.where(Dis_2 < 0.01, 0.01, Dis_2)
+            Q_2 = np.sum(Dis_2 * A) / np.sum(Dis_2)
+            if Q_2 < Q:
+                Q = Q_2
+                Pos = Pos_2
+                break
+            if max(map(np.max, map(np.abs, δ * α))) <= disp_min:
+                break
+            α /= 2
+        if max(map(np.max, map(np.abs, δ * α))) <= disp_min:
+            break
+    if nnodes == 1:
+        Pos = np.array([center], dtype=np.float64)
+    return Pos
 
 
 def spectral_layout(G, weight='weight', scale=1, center=None, dim=2):

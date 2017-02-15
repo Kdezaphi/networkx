@@ -236,7 +236,7 @@ def fruchterman_reingold_layout(G, k=None,
     ----------
     G : NetworkX graph or list of nodes
 
-    k : float (default=None)
+    k : float optional (default=None)
         Optimal distance between nodes.  If None the distance is set to
         1/sqrt(n) where n is the number of nodes.  Increase this value
         to move nodes farther apart.
@@ -256,14 +256,14 @@ def fruchterman_reingold_layout(G, k=None,
         The edge attribute that holds the numerical value used for
         the edge weight.  If None, then all edge weights are 1.
 
-    scale : float (default=1.0)
+    scale : float optional (default=1.0)
         Scale factor for positions. The nodes are positioned
         in a box of size [0, scale] x [0, scale].
 
-    center : array-like or None
+    center : array-like or None optional
         Coordinate pair around which to center the layout.
 
-    dim : int
+    dim : optional int
         Dimension of layout
 
     Returns
@@ -470,46 +470,28 @@ def _sparse_fruchterman_reingold(A, k=None, pos=None, fixed=None,
     return pos
 
 
-def force_atlas_2_layout(G, k=0, g=1,
+def force_atlas_2_layout(G, k=None, g=1,
+                         pos=None,
+                         fixed=None,
+                         iterations=0,
+                         weight='weight',
+                         scale=1.0,
+                         center=None,
+                         dim=2,
                          strong_gravity=False,
                          edge_weight_influence=1,
                          log_attraction=False,
                          dissuade_hubs=False,
-                         pos=None,
-                         fixed=None,
-                         iterations=0,
-                         displacement_min=1,
-                         weight='weight',
-                         scale=1.0,
-                         center=None,
-                         dim=2):
+                         displacement_min=1):
     """Position nodes using Force Atlas 2 force-directed algorithm.
 
     Parameters
     ----------
     G : NetworkX graph or list of nodes
 
-    k : float  optional (default=2 beyond 100 nodes else 10)
+    k : float  optional (default=2 beyond 100 nodes else 10) FIXME: Copier la syntaxe de FR
         Scalar to adjust repulsion force. The more it is, the more
         the repulsion is stronger.
-
-    g : float  optional (default=1)
-        Scalar to adjust gravity force. The more it is, the more nodes
-        are attracted to the center.
-
-    strong_gravity : boolean  optional (default=False)
-        Attract more the nodes that are distant frmo the center by removing
-        the division by the distance.
-
-    edge_weight_influence : float  optional (default=1)
-        If the edges are weighted, power the edges by this value.
-
-    log_attraction : boolean  optional (default=False)
-        Use logarithm attraction force instead of proportionnal.
-
-    dissuade_hubs : boolean  optional (default=False)
-        Divide the attraction by the degree plus one
-        for nodes it point to.
 
     pos : dict or None  optional (default=None)
         Initial positions for nodes as a dictionary with node as keys
@@ -524,23 +506,41 @@ def force_atlas_2_layout(G, k=0, g=1,
         maximum displacement is under displacement_min or when the
         number of iterations is reach. If it is 0 it is set to np.inf.
 
-    displacement_min : float  optional (default=0.1)
-        Scalar to set the minimum displacement of the maximum displacement
-        to stop the algorithm.
-
     weight : string or None   optional (default='weight')
         The edge attribute that holds the numerical value used for
         the edge weight.  If None, then all edge weights are 1.
 
     scale : float  optional (default=1.0)
         Scale factor for positions. The nodes are positioned
-        in a box of size [-scale, scale] x [-scale, scale].
+        in a box of size [0, scale] x [0, scale].
 
     center : array-like or None  optional
         Coordinate pair around which to center the layout.
 
     dim : int  optional (default=2)
         Dimension of layout
+
+    g : float  optional (default=1)
+        Scalar to adjust gravity force. The higher it is, the more nodes
+        are attracted to the center. A g of 0 with a disconnected graph
+        will lead to a vary spread out layout and slow convergence.
+
+    strong_gravity : boolean  optional (default=False)
+        Gravity goes from 1/distance (the default)
+
+    edge_weight_influence : float  optional (default=1)
+        If the edges are weighted, power the edges by this value.
+
+    log_attraction : boolean  optional (default=False)
+        Use logarithm attraction force instead of proportionnal.
+
+    dissuade_hubs : boolean  optional (default=False)
+        Divide the attraction by the degree plus one
+        for nodes it point to.
+
+    displacement_min : float  optional (default=0.1)
+        Scalar to set the minimum displacement of the maximum displacement
+        to stop the algorithm.
 
     Returns
     -------

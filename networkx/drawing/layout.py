@@ -470,7 +470,7 @@ def _sparse_fruchterman_reingold(A, k=None, pos=None, fixed=None,
     return pos
 
 
-def force_atlas_2_layout(G, k=None, g=1,
+def force_atlas_2_layout(G, k=None,
                          pos=None,
                          fixed=None,
                          iterations=0,
@@ -478,6 +478,7 @@ def force_atlas_2_layout(G, k=None, g=1,
                          scale=1.0,
                          center=None,
                          dim=2,
+                         g=1,
                          strong_gravity=False,
                          edge_weight_influence=1,
                          log_attraction=False,
@@ -489,9 +490,9 @@ def force_atlas_2_layout(G, k=None, g=1,
     ----------
     G : NetworkX graph or list of nodes
 
-    k : float  optional (default=2 beyond 100 nodes else 10) FIXME: Copier la syntaxe de FR
-        Scalar to adjust repulsion force. The more it is, the more
-        the repulsion is stronger.
+    k : float  optional (default=None) FIXME: Copier la syntaxe de FR
+        Scalar to adjust repulsion force. If None it is set to 10 under
+        100 nodes else 2. The more it is, the more the repulsion is stronger.
 
     pos : dict or None  optional (default=None)
         Initial positions for nodes as a dictionary with node as keys
@@ -587,9 +588,9 @@ def force_atlas_2_layout(G, k=None, g=1,
 
     M = np.array([[1] if not fixed or node not in fixed else [0]
                   for node in G])
-    Hub = (1 + np.sum(A, axis=1)).reshape((nnodes, 1)) @ ones.T
+    Hub = (1 + np.sum(A, axis=1)).reshape((nnodes, 1)).matmul(ones.T)
     Deg = np.vstack(((1 + np.sum(A, 1)),
-                     Hub * (ones @ (1 + np.sum(A, 1)).reshape((1,
+                     Hub * (ones.matmul(1 + np.sum(A, 1)).reshape((1,
                                                                nnodes)))))
     Deg[1:] *= k
 

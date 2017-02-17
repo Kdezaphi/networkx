@@ -567,7 +567,7 @@ def force_atlas_2_layout(G, k=None,
     nnodes, _ = A.shape
 
     shape = (len(G), dim)
-    if pos is not None:
+    if pos:
         # Determine size of existing domain to adjust initial positions
         dom_size = max(coord for pos_tup in pos.values() for coord in pos_tup)
         Pos = np.random.random(shape) * dom_size + center
@@ -588,10 +588,9 @@ def force_atlas_2_layout(G, k=None,
 
     M = np.array([[1] if not fixed or node not in fixed else [0]
                   for node in G])
-    Hub = (1 + np.sum(A, axis=1)).reshape((nnodes, 1)).matmul(ones.T)
-    Deg = np.vstack(((1 + np.sum(A, 1)),
-                     Hub * (ones.matmul(1 + np.sum(A, 1)).reshape((1,
-                                                               nnodes)))))
+    Hub = np.matmul((1 + np.sum(A, axis=1)).reshape((nnodes, 1)), ones.T)
+    Deg = np.vstack(((1 + np.sum(A, 1)), Hub *
+                     np.matmul(ones, (1 + np.sum(A, 1)).reshape((1, nnodes)))))
     Deg[1:] *= k
 
     def force_atlas_2(Dis, Δ_norm):
@@ -611,7 +610,7 @@ def force_atlas_2_layout(G, k=None,
             f_att /= Hub
         f_att = f_att.reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
 
-        return np.sum(f_att, axis=1) - np.sum(f_rep, axis=1) + f_gra
+        return np.sum(f_att, axis=1) - np.sum(f_rep, axis=1) - f_gra
 
     Pos = _spacialization(A, Pos, M, displacement_min, iterations,
                           force_atlas_2, center, scale, dim)
@@ -696,7 +695,7 @@ def spat_fruchterman_reingold_layout(G, k=None,
                   for node in G])
 
     shape = (len(G), dim)
-    if pos is not None:
+    if pos:
         # Determine size of existing domain to adjust initial positions
         dom_size = max(coord for pos_tup in pos.values() for coord in pos_tup)
         Pos = np.random.random(shape) * dom_size + center
@@ -753,31 +752,37 @@ def _spacialization(A, Pos, M, disp_min, iteration,
         msg = "_spacialization() takes an adjacency matrix as input"
         raise nx.NetworkXError(msg)
 
+    Q_improve = True
     Q = np.inf
     α = 1
     i = 0
     while True and i < iteration:
-        Δ = np.vstack((np.array([Pos]),
-                       np.vstack([[Pos]] * nnodes) -
-                       np.transpose(np.vstack(([[Pos]] * nnodes)), (1, 0, 2))))
-        Dis = np.linalg.norm(Δ, axis=2)
-        Dis = np.where(Dis < 0.01, 0.01, Dis)
-        Δ_norm = Δ / Dis.reshape((nnodes + 1, nnodes, 1))
-        δ = get_f(Dis, Δ_norm) * M
-        while True and i < iteration:
-            i += 1
-            Pos_2 = Pos + δ * α
-            Δ_2 = np.vstack([[Pos_2]] * nnodes) -\
-                np.transpose(np.vstack(([[Pos_2]] * nnodes)), (1, 0, 2))
-            Dis_2 = np.linalg.norm(Δ_2, axis=2)
-            Dis_2 = np.where(Dis_2 < 0.01, 0.01, Dis_2)
-            Q_2 = np.sum(Dis_2 * A) / np.sum(Dis_2)
-            if Q_2 < Q:
-                Q = Q_2
-                Pos = Pos_2
-                break
-            if max(map(np.max, map(np.abs, δ * α))) <= disp_min:
-                break
+        i += 1
+        if Q_improve:
+            Δ = np.vstack((np.array([Pos]),
+                           np.vstack([[Pos]] * nnodes) -
+                           np.transpose(np.vstack(([[Pos]] * nnodes)),
+                                        (1, 0, 2))))
+            Dis = np.linalg.norm(Δ, axis=2)
+            Dis = np.where(Dis < 0.01, 0.01, Dis)
+            Δ_norm = Δ / Dis.reshape((nnodes + 1, nnodes, 1))
+            δ = get_f(Dis, Δ_norm) * M
+            Q_improve = False
+        Pos_2 = Pos + δ * α
+        Δ_2 = np.vstack((np.array([Pos_2]),
+                         np.vstack([[Pos_2]] * nnodes) -
+                         np.transpose(np.vstack(([[Pos_2]] * nnodes)),
+                                      (1, 0, 2))))
+        Dis_2 = np.linalg.norm(Δ_2, axis=2)
+        Dis_2 = np.where(Dis_2 < 0.01, 0.01, Dis_2)
+        Δ_norm_2 = Δ_2 / Dis_2.reshape((nnodes + 1, nnodes, 1))
+        δ_2 = get_f(Dis_2, Δ_norm_2) * M
+        Q_2 = np.sum(np.linalg.norm(δ_2)) / nnodes
+        if Q_2 < Q:
+            Q = Q_2
+            Q_improve = True
+            Pos = Pos_2
+        else:
             α /= 2
         if max(map(np.max, map(np.abs, δ * α))) <= disp_min:
             break

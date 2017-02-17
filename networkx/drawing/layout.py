@@ -778,6 +778,7 @@ def _spacialization(A, Pos, M, disp_min, iteration,
         Δ_norm_2 = Δ_2 / Dis_2.reshape((nnodes + 1, nnodes, 1))
         δ_2 = get_f(Dis_2, Δ_norm_2) * M
         Q_2 = np.sum(np.linalg.norm(δ_2)) / nnodes
+        α = α * Q / Q_2
         if Q_2 < Q:
             Q = Q_2
             Q_improve = True

@@ -551,7 +551,7 @@ def force_atlas_2_layout(G, k=None,
     Examples
     --------
     >>> G = nx.path_graph(4)
-    >>> pos = nx.spat_force_atlas_2(G)
+    >>> pos = nx.force_atlas_2_layout(G)
     """
     import random
     import numpy as np

@@ -478,8 +478,7 @@ def force_atlas_2_layout(G, k=None,
                          scale=1.0,
                          center=None,
                          dim=2,
-                         g=1,
-                         strong_gravity=False,
+                         g=0,
                          edge_weight_influence=1,
                          log_attraction=False,
                          dissuade_hubs=False,
@@ -523,16 +522,10 @@ def force_atlas_2_layout(G, k=None,
     dim : int  optional (default=2)
         Dimension of layout
 
-    g : float  optional (default=1)
+    g : float  optional (default=0)
         Scalar to adjust "gravity" force. The higher it is, the more nodes
-        are attracted to the center.
-        FIXME: Comprendre l'effet de g
-        A g of 0 with a disconnected graph
-        will lead to a vary spread out layout and slow convergence.
-
-    strong_gravity : boolean  optional (default=False)
-        Gravity goes from 1/distance (the default)
-        FIXME: Deux paramètres pour un seul truc ?
+        are attracted to the center. "Gravity" is a linear function of
+        distance power by g.
 
     edge_weight_influence : float  optional (default=1)
         If the edges are weighted (edges must have a 'weight' attribute),
@@ -604,47 +597,36 @@ def force_atlas_2_layout(G, k=None,
 
     # ∀ x, Hub[i, x] is the 1 + the number of outgoing edges from node i
     Hub = np.matmul((1 + np.sum(A, axis=1)).reshape((nnodes, 1)), ones.T)
-    # FIXME: Regarder quand on utilise Deg si on peut en faire une matrice carrée
-    # FIXME: Def, Dis, Delta, deviennent n x n
-    # FIXME: On donne la position à la fonction de force
-    # FIXME: On calcule la gravité à partir de Hub et pos
-    Deg = np.vstack([1 + np.sum(A, axis=1),
-                     Hub *
-                     np.matmul(ones, (1 + np.sum(A, axis=1)).reshape((1, nnodes)))])
-    # FIXME: Voir si on peut le faire ailleurs
-    Deg[1:] *= k
+    Deg = Hub * np.matmul(ones, (1 + np.sum(A, axis=1)).reshape((1, nnodes)))
 
-    def force_atlas_2(Dis, Δ_norm):
+    def force_atlas_2(Dis, Δ_unit, Pos):
         """Return the n x dim displacement vector for Froce Atlas 2.
 
         The forces are computed according to the paper
 
-        Jacomy, M., Venturini, T., Heymann, S., & Bastian, M. (2014). ForceAtlas2, a continuous graph layout algorithm for handy network visualization designed for the Gephi software.
-
-        FIXME: s/Δ_norm/Δ_unit/
+        Jacomy, M., Venturini, T., Heymann, S., & Bastian, M. (2014).
+        ForceAtlas2, a continuous graph layout algorithm for handy network
+        visualization designed for the Gephi software.
         """
-        f_gra = Deg[0]
-        # FIXME: Remove strong_gravity, multiply by Dis**g if g is not None
-        # FIXME: mettre g par défaut à la valeur suggérée dans le papier
-        if not strong_gravity:
-            f_gra /= Dis[0]
-        f_gra = f_gra.reshape((nnodes, 1)) * Δ_norm[0]  # FIXME virer le reshape
+        Pos_norm = np.linalg.norm(Pos, axis=1)
+        f_gra = Hub[0] * Pos_norm.reshape(1, nnodes)**g
+        f_gra = f_gra.reshape(nnodes, 1) * Pos / Pos_norm.reshape(nnodes, 1)
 
-        f_rep = Deg[1:] / Dis[1:]
-        f_rep = f_rep.reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
+        f_rep = k * Deg / Dis
+        f_rep = f_rep.reshape((nnodes, nnodes, 1)) * Δ_unit
 
         if log_attraction:
-            f_att = np.log(Dis[1:]) * W
+            f_att = np.log(Dis) * W
         else:
-            f_att = Dis[1:] * W
+            f_att = Dis * W
         if dissuade_hubs:
             f_att /= Hub
-        f_att = f_att.reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
+        f_att = f_att.reshape((nnodes, nnodes, 1)) * Δ_unit
 
         return np.sum(f_att - f_rep, axis=1) - f_gra
 
-    Pos = _spatialization(A, Pos, M, displacement_min, iterations,
-                          force_atlas_2, center, scale, dim)
+    Pos = spatialization(A, force_atlas_2, Pos, M, iterations, scale,
+                          center, dim, displacement_min)
     if fixed is None:
         Pos = nx.rescale_layout(Pos, scale=scale) + center
     pos = dict(zip(G, Pos))
@@ -755,75 +737,132 @@ def spat_fruchterman_reingold_layout(G, k=None,
         else:
             k = np.sqrt(1.0/nnodes)
 
-    def fruchterman_reingold(Dis, Δ_norm):
-        f_rep = (k * k / Dis[1:]**2).reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
+    def fruchterman_reingold(Dis, Δ_unit, Pos):
+        f_rep = (k * k / Dis**2).reshape((nnodes, nnodes, 1)) * Δ_unit
 
-        f_att = (W * Dis[1:] / k).reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
+        f_att = (W * Dis / k).reshape((nnodes, nnodes, 1)) * Δ_unit
 
         return np.sum(f_att, axis=1) - np.sum(f_rep, axis=1)
 
-    pos = _spacialization(A, Pos, M, displacement_min, iterations,
-                          fruchterman_reingold, center, scale, dim)
+    pos = _spacialization(A, fruchterman_reingold, Pos, M, iterations, scale,
+                          center, dim, displacement_min)
     if fixed is None:
         pos = nx.rescale_layout(pos, scale=scale) + center
     pos = dict(zip(G, pos))
     return pos
 
 
-def _spatialization(A, Pos, M, disp_min, iteration,
-                    get_f, center, scale, dim):
+def spatialization(A,
+                   get_displacement,
+                   Pos=None,
+                   M=None,
+                   iterations=0,
+                   scale=1.0,
+                   center=None,
+                   dim=2,
+                   displacement_min=1):
     """Run a generic force-directed algorithm on the graph defined by A and Pos.
 
-    # FIXME: Changer le nom de get_f
-    # FIXME: Ecrire la docstring de cette fonction
-    # FIXME: Virer le _
+    A : array-like
+        Adjacency matrix of a graph.
+
+    get_displacement : function
+        Function to compute the displacement for one iteration with the
+        matrix of position, distance between nodes and unit distance
+        among each dimension.
+
+    Pos : array-like optional (default=None)
+        Position matrix of the nodes, must have the same number of row as A and
+        the same number of columns as dim. If None, initialized with
+        random positions.
+
+    M : array-like  optional (default=None)
+        Column vector to describe if the nodes or fixed (0) or movable (1).
+        If None all nodes are movable.
+
+    iterations : int  optional (default=0)
+        Number of maximum iterations. The algorithm stops when the
+        maximum displacement is under displacement_min or when the
+        number of iterations is reached. If it is 0, then there is no
+        limit on the number of iterations. The algorithm is guaranteed
+        to converge if displacement_min>0.
+
+    scale : float  optional (default=1.0)
+        Scale factor for positions. The nodes are positioned
+        in a box of size [0, scale] x [0, scale].
+
+    center : array-like or None  optional
+        Coordinate pair around which to center the layout.
+
+    dim : int  optional (default=2)
+        Dimension of layout
+
+    displacement_min : float  optional (default=1)
+        The algorithm stops if an iteration would make the node that moves the most
+        move less than displacement_min.
+        The default of one pixel makes a lot of sense. Values < 1 will lead to
+        much slower convergence.
     """
 
     try:
         import numpy as np
     except ImportError:
-        msg = "_spacialization() requires numpy: http://scipy.org/ "
+        msg = "spacialization() requires numpy: http://scipy.org/ "
         raise ImportError(msg)
 
     try:
         nnodes, _ = A.shape
     except AttributeError:
-        msg = "_spacialization() takes an adjacency matrix as input"
+        msg = "spacialization() takes an adjacency matrix as input"
         raise nx.NetworkXError(msg)
 
+    if Pos is None:
+        Pos = np.random.rand(nnodes, dim)
+    elif (nnodes, dim) != Pos.shape:
+        msg = "shape Pos " + str(Pos.shape) + " is not (" + str(nnodes) +\
+            ", " + str(dim) + ")."
+        raise ValueError(msg)
+
     ones = np.ones((nnodes, 1))
+
+    if M is None:
+        M = ones
+    elif (nnodes, 1) != M.shape:
+        msg = "shape M " + str(Pos.shape) + " is not (" + str(nnodes) + ", 1)."
+        raise ValueError(msg)
+
+    if center is None:
+        center = np.zeros(dim)
+    else:
+        center = np.asarray(center)
+
+    if len(center) != dim:
+        msg = "length of center coordinates must match dimension of layout"
+        raise ValueError(msg)
 
     Q_improve = True
     Q = np.inf
     α = 1
     i = 0
-    while True and i < iteration:
+    while True and i < iterations:
         i += 1
         if Q_improve:
-            Δ = np.vstack((np.array([Pos]),
-                           np.dstack([np.matmul(ones,
-                                                Pos[:,i].T.reshape(1,
-                                                                   nnodes)) -
-                                      np.matmul(Pos[:,i].reshape(nnodes, 1),
-                                                ones.T)
-                                      for i in range(dim)])))
+            Δ = np.dstack([np.matmul(ones, Pos[:,i].T.reshape(1, nnodes)) -
+                           np.matmul(Pos[:,i].reshape(nnodes, 1), ones.T)
+                           for i in range(dim)])
             Dis = np.linalg.norm(Δ, axis=2)
             Dis = np.where(Dis < 0.01, 0.01, Dis)
-            Δ_norm = Δ / Dis.reshape((nnodes + 1, nnodes, 1))
-            δ = get_f(Dis, Δ_norm) * M
+            Δ_unit = Δ / Dis.reshape((nnodes, nnodes, 1))
+            δ = get_displacement(Dis, Δ_unit, Pos) * M
             Q_improve = False
         Pos_2 = Pos + δ * α
-        Δ_2 = np.vstack((np.array([Pos_2]),
-                         np.dstack([np.matmul(ones,
-                                              Pos_2[:,i].T.reshape(1,
-                                                                   nnodes)) -
-                                    np.matmul(Pos_2[:,i].reshape(nnodes, 1),
-                                              ones.T)
-                                    for i in range(dim)])))
+        Δ_2 = np.dstack([np.matmul(ones, Pos_2[:,i].T.reshape(1, nnodes)) -
+                         np.matmul(Pos_2[:,i].reshape(nnodes, 1), ones.T)
+                         for i in range(dim)])
         Dis_2 = np.linalg.norm(Δ_2, axis=2)
         Dis_2 = np.where(Dis_2 < 0.01, 0.01, Dis_2)
-        Δ_norm_2 = Δ_2 / Dis_2.reshape((nnodes + 1, nnodes, 1))
-        δ_2 = get_f(Dis_2, Δ_norm_2) * M
+        Δ_unit_2 = Δ_2 / Dis_2.reshape((nnodes, nnodes, 1))
+        δ_2 = get_displacement(Dis_2, Δ_unit_2, Pos_2) * M
         Q_2 = np.sum(np.linalg.norm(δ_2)) / nnodes
         if Q != np.inf:
             α = α * Q / Q_2
@@ -835,7 +874,7 @@ def _spatialization(A, Pos, M, disp_min, iteration,
             Pos = Pos_2
         else:
             α /= 2
-        if max(map(np.max, map(np.abs, δ * α))) <= disp_min:
+        if max(map(np.max, map(np.abs, δ * α))) <= displacement_min:
             break
     if nnodes == 1:
         Pos = np.array([center], dtype=np.float64)

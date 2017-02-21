@@ -490,9 +490,9 @@ def force_atlas_2_layout(G, k=None,
     ----------
     G : NetworkX graph or list of nodes
 
-    k : float  optional (default=None) FIXME: Copier la syntaxe de FR
+    k : float  optional (default=None)
         Scalar to adjust repulsion force. If None it is set to 10 under
-        100 nodes else 2. The more it is, the more the repulsion is stronger.
+        100 nodes else 2. The higher it is, the stronger the repulsion is.
 
     pos : dict or None  optional (default=None)
         Initial positions for nodes as a dictionary with node as keys
@@ -503,9 +503,11 @@ def force_atlas_2_layout(G, k=None,
         Nodes to keep fixed at initial position.
 
     iterations : int  optional (default=0)
-        Number of maximum iterations. The algorithm stop when the
+        Number of maximum iterations. The algorithm stops when the
         maximum displacement is under displacement_min or when the
-        number of iterations is reach. If it is 0 it is set to np.inf.
+        number of iterations is reached. If it is 0, then there is no
+        limit on the number of iterations. The algorithm is guaranteed
+        to converge if displacement_min>0.
 
     weight : string or None   optional (default='weight')
         The edge attribute that holds the numerical value used for
@@ -522,28 +524,32 @@ def force_atlas_2_layout(G, k=None,
         Dimension of layout
 
     g : float  optional (default=1)
-        Scalar to adjust gravity force. The higher it is, the more nodes
-        are attracted to the center. A g of 0 with a disconnected graph
+        Scalar to adjust "gravity" force. The higher it is, the more nodes
+        are attracted to the center.
+        FIXME: Comprendre l'effet de g
+        A g of 0 with a disconnected graph
         will lead to a vary spread out layout and slow convergence.
 
     strong_gravity : boolean  optional (default=False)
         Gravity goes from 1/distance (the default)
+        FIXME: Deux paramètres pour un seul truc ?
 
     edge_weight_influence : float  optional (default=1)
-        If the edges are weighted, power the edges by this value.
+        If the edges are weighted (edges must have a 'weight' attribute),
+        attraction is a linear function of distance multiplied by the weight
+        to the power of edge_weight_influence (unless log_attraction is True).
 
     log_attraction : boolean  optional (default=False)
         Use logarithm attraction force instead of proportionnal.
 
     dissuade_hubs : boolean  optional (default=False)
-        Divide the attraction by the degree plus one
-        for nodes it point to.
+        Divide the attraction by the number of outgoing links plus one.
 
-    norm : boolean  optional (default=True)
-
-    displacement_min : float  optional (default=0.1)
-        Scalar to set the minimum displacement of the maximum displacement
-        to stop the algorithm.
+    displacement_min : float  optional (default=1)
+        The algorithm stops if an iteration would make the node that moves the most
+        move less than displacement_min.
+        The default of one pixel makes a lot of sense. Values < 1 will lead to
+        much slower convergence.
 
     Returns
     -------
@@ -552,10 +558,10 @@ def force_atlas_2_layout(G, k=None,
 
     Examples
     --------
+    FIXME: Regarder les tests ailleurs
     >>> G = nx.path_graph(4)
     >>> pos = nx.force_atlas_2_layout(G)
     """
-    import random
     import numpy as np
 
     G, center = _process_params(G, center, dim)
@@ -585,21 +591,44 @@ def force_atlas_2_layout(G, k=None,
         return {next(G.nodes()): center}
 
     if not k:
+        # Default values inspired from Force Atlas' Java implementation
         k = 2 if nnodes > 100 else 10
+
+    if len(G) > 5000:
+        raise NotImplementedError("Sparse matrix Force Atlas 2 is not implemented yet")
+
     ones = np.ones((nnodes, 1))
 
     M = np.array([[1] if not fixed or node not in fixed else [0]
                   for node in G])
+
+    # ∀ x, Hub[i, x] is the 1 + the number of outgoing edges from node i
     Hub = np.matmul((1 + np.sum(A, axis=1)).reshape((nnodes, 1)), ones.T)
-    Deg = np.vstack(((1 + np.sum(A, 1)), Hub *
-                     np.matmul(ones, (1 + np.sum(A, 1)).reshape((1, nnodes)))))
+    # FIXME: Regarder quand on utilise Deg si on peut en faire une matrice carrée
+    # FIXME: Def, Dis, Delta, deviennent n x n
+    # FIXME: On donne la position à la fonction de force
+    # FIXME: On calcule la gravité à partir de Hub et pos
+    Deg = np.vstack([1 + np.sum(A, axis=1),
+                     Hub *
+                     np.matmul(ones, (1 + np.sum(A, axis=1)).reshape((1, nnodes)))])
+    # FIXME: Voir si on peut le faire ailleurs
     Deg[1:] *= k
 
     def force_atlas_2(Dis, Δ_norm):
+        """Return the n x dim displacement vector for Froce Atlas 2.
+
+        The forces are computed according to the paper
+
+        Jacomy, M., Venturini, T., Heymann, S., & Bastian, M. (2014). ForceAtlas2, a continuous graph layout algorithm for handy network visualization designed for the Gephi software.
+
+        FIXME: s/Δ_norm/Δ_unit/
+        """
         f_gra = Deg[0]
+        # FIXME: Remove strong_gravity, multiply by Dis**g if g is not None
+        # FIXME: mettre g par défaut à la valeur suggérée dans le papier
         if not strong_gravity:
             f_gra /= Dis[0]
-        f_gra = f_gra.reshape((nnodes, 1)) * Δ_norm[0]
+        f_gra = f_gra.reshape((nnodes, 1)) * Δ_norm[0]  # FIXME virer le reshape
 
         f_rep = Deg[1:] / Dis[1:]
         f_rep = f_rep.reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
@@ -614,7 +643,7 @@ def force_atlas_2_layout(G, k=None,
 
         return np.sum(f_att - f_rep, axis=1) - f_gra
 
-    Pos = _spacialization(A, Pos, M, displacement_min, iterations,
+    Pos = _spatialization(A, Pos, M, displacement_min, iterations,
                           force_atlas_2, center, scale, dim)
     if fixed is None:
         Pos = nx.rescale_layout(Pos, scale=scale) + center
@@ -741,8 +770,14 @@ def spat_fruchterman_reingold_layout(G, k=None,
     return pos
 
 
-def _spacialization(A, Pos, M, disp_min, iteration,
+def _spatialization(A, Pos, M, disp_min, iteration,
                     get_f, center, scale, dim):
+    """Run a generic force-directed algorithm on the graph defined by A and Pos.
+
+    # FIXME: Changer le nom de get_f
+    # FIXME: Ecrire la docstring de cette fonction
+    # FIXME: Virer le _
+    """
 
     try:
         import numpy as np

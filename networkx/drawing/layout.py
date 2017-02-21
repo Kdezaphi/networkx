@@ -539,6 +539,8 @@ def force_atlas_2_layout(G, k=None,
         Divide the attraction by the degree plus one
         for nodes it point to.
 
+    norm : boolean  optional (default=True)
+
     displacement_min : float  optional (default=0.1)
         Scalar to set the minimum displacement of the maximum displacement
         to stop the algorithm.
@@ -603,19 +605,19 @@ def force_atlas_2_layout(G, k=None,
         f_rep = f_rep.reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
 
         if log_attraction:
-            f_att = np.log(Dis[1:])
+            f_att = np.log(Dis[1:]) * W
         else:
             f_att = Dis[1:] * W
         if dissuade_hubs:
             f_att /= Hub
         f_att = f_att.reshape((nnodes, nnodes, 1)) * Δ_norm[1:]
 
-        return np.sum(f_att, axis=1) - np.sum(f_rep, axis=1) - f_gra
+        return np.sum(f_att - f_rep, axis=1) - f_gra
 
     Pos = _spacialization(A, Pos, M, displacement_min, iterations,
                           force_atlas_2, center, scale, dim)
     if fixed is None:
-        Pos = rescale_layout(Pos, scale=scale) + center
+        Pos = nx.rescale_layout(Pos, scale=scale) + center
     pos = dict(zip(G, Pos))
     return pos
 
@@ -670,6 +672,8 @@ def spat_fruchterman_reingold_layout(G, k=None,
 
     dim : int
         Dimension of layout
+
+    fast : boolean  optional (default=True)
 
     Returns
     -------
@@ -732,7 +736,7 @@ def spat_fruchterman_reingold_layout(G, k=None,
     pos = _spacialization(A, Pos, M, displacement_min, iterations,
                           fruchterman_reingold, center, scale, dim)
     if fixed is None:
-        pos = rescale_layout(pos, scale=scale) + center
+        pos = nx.rescale_layout(pos, scale=scale) + center
     pos = dict(zip(G, pos))
     return pos
 
@@ -752,6 +756,8 @@ def _spacialization(A, Pos, M, disp_min, iteration,
         msg = "_spacialization() takes an adjacency matrix as input"
         raise nx.NetworkXError(msg)
 
+    ones = np.ones((nnodes, 1))
+
     Q_improve = True
     Q = np.inf
     α = 1
@@ -760,9 +766,12 @@ def _spacialization(A, Pos, M, disp_min, iteration,
         i += 1
         if Q_improve:
             Δ = np.vstack((np.array([Pos]),
-                           np.vstack([[Pos]] * nnodes) -
-                           np.transpose(np.vstack(([[Pos]] * nnodes)),
-                                        (1, 0, 2))))
+                           np.dstack([np.matmul(ones,
+                                                Pos[:,i].T.reshape(1,
+                                                                   nnodes)) -
+                                      np.matmul(Pos[:,i].reshape(nnodes, 1),
+                                                ones.T)
+                                      for i in range(dim)])))
             Dis = np.linalg.norm(Δ, axis=2)
             Dis = np.where(Dis < 0.01, 0.01, Dis)
             Δ_norm = Δ / Dis.reshape((nnodes + 1, nnodes, 1))
@@ -770,16 +779,22 @@ def _spacialization(A, Pos, M, disp_min, iteration,
             Q_improve = False
         Pos_2 = Pos + δ * α
         Δ_2 = np.vstack((np.array([Pos_2]),
-                         np.vstack([[Pos_2]] * nnodes) -
-                         np.transpose(np.vstack(([[Pos_2]] * nnodes)),
-                                      (1, 0, 2))))
+                         np.dstack([np.matmul(ones,
+                                              Pos_2[:,i].T.reshape(1,
+                                                                   nnodes)) -
+                                    np.matmul(Pos_2[:,i].reshape(nnodes, 1),
+                                              ones.T)
+                                    for i in range(dim)])))
         Dis_2 = np.linalg.norm(Δ_2, axis=2)
         Dis_2 = np.where(Dis_2 < 0.01, 0.01, Dis_2)
         Δ_norm_2 = Δ_2 / Dis_2.reshape((nnodes + 1, nnodes, 1))
         δ_2 = get_f(Dis_2, Δ_norm_2) * M
         Q_2 = np.sum(np.linalg.norm(δ_2)) / nnodes
-        α = α * Q / Q_2
+        if Q != np.inf:
+            α = α * Q / Q_2
         if Q_2 < Q:
+            if Q != np.inf and Q_2 != np.inf:
+                α = α * Q / Q_2
             Q = Q_2
             Q_improve = True
             Pos = Pos_2

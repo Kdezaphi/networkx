@@ -36,7 +36,8 @@ __all__ = ['circular_layout',
            'spectral_layout',
            'fruchterman_reingold_layout',
            'force_atlas_2_layout',
-           'spat_fruchterman_reingold_layout']
+           'spat_fruchterman_reingold_layout',
+           'spatialization']
 
 
 def _process_params(G, center, dim):
@@ -608,9 +609,10 @@ def force_atlas_2_layout(G, k=None,
         ForceAtlas2, a continuous graph layout algorithm for handy network
         visualization designed for the Gephi software.
         """
-        Pos_norm = np.linalg.norm(Pos, axis=1)
-        f_gra = Hub[0] * Pos_norm.reshape(1, nnodes)**g
-        f_gra = f_gra.reshape(nnodes, 1) * Pos / Pos_norm.reshape(nnodes, 1)
+        Dis_center = np.linalg.norm(Pos, axis=1)
+        Dis_center = np.where(Dis_center < 0.01, 0.01, Dis_center)
+        f_gra = Hub[0] * Dis_center.reshape(1, nnodes)**g
+        f_gra = f_gra.reshape(nnodes, 1) * Pos / Dis_center.reshape(nnodes, 1)
 
         f_rep = k * Deg / Dis
         f_rep = f_rep.reshape((nnodes, nnodes, 1)) * Δ_unit
@@ -625,8 +627,8 @@ def force_atlas_2_layout(G, k=None,
 
         return np.sum(f_att - f_rep, axis=1) - f_gra
 
-    Pos = spatialization(A, force_atlas_2, Pos, M, iterations, scale,
-                          center, dim, displacement_min)
+    Pos = nx.spatialization(A, force_atlas_2, Pos, M, iterations, scale,
+                            center, dim, displacement_min)
     if fixed is None:
         Pos = nx.rescale_layout(Pos, scale=scale) + center
     pos = dict(zip(G, Pos))
@@ -744,8 +746,8 @@ def spat_fruchterman_reingold_layout(G, k=None,
 
         return np.sum(f_att, axis=1) - np.sum(f_rep, axis=1)
 
-    pos = _spacialization(A, fruchterman_reingold, Pos, M, iterations, scale,
-                          center, dim, displacement_min)
+    pos = nx.spatialization(A, fruchterman_reingold, Pos, M, iterations, scale,
+                            center, dim, displacement_min)
     if fixed is None:
         pos = nx.rescale_layout(pos, scale=scale) + center
     pos = dict(zip(G, pos))

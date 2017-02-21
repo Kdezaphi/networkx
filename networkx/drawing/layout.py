@@ -515,7 +515,7 @@ def force_atlas_2_layout(G, k=None,
 
     scale : float  optional (default=1.0)
         Scale factor for positions. The nodes are positioned
-        in a box of size [0, scale] x [0, scale].
+        in a box of size [0, scale] x [0, scale], unless some nodes are fixed.
 
     center : array-like or None  optional
         Coordinate pair around which to center the layout.
@@ -571,6 +571,7 @@ def force_atlas_2_layout(G, k=None,
     shape = (len(G), dim)
     if pos:
         # Determine size of existing domain to adjust initial positions
+        # TODO: use in all force-directed layouts
         dom_size = max(coord for pos_tup in pos.values() for coord in pos_tup)
         Pos = np.random.random(shape) * dom_size + center
         for i, n in enumerate(G):
@@ -598,24 +599,37 @@ def force_atlas_2_layout(G, k=None,
 
     # ∀ x, Hub[i, x] is the 1 + the number of outgoing edges from node i
     Hub = np.matmul((1 + np.sum(A, axis=1)).reshape((nnodes, 1)), ones.T)
-    Deg = Hub * np.matmul(ones, (1 + np.sum(A, axis=1)).reshape((1, nnodes)))
+    # Hub times 1 + the number of incoming edges is used as the degree in
+    # Force Atlas 2. It has the nice property of never being 0.
+    Deg = Hub * np.matmul(ones, (1 + np.sum(A, axis=0)).reshape((1, nnodes)))
 
     def force_atlas_2(Dis, Δ_unit, Pos):
-        """Return the n x dim displacement vector for Froce Atlas 2.
+        """Return the n x dim displacement vector for Force Atlas 2.
 
         The forces are computed according to the paper
 
         Jacomy, M., Venturini, T., Heymann, S., & Bastian, M. (2014).
         ForceAtlas2, a continuous graph layout algorithm for handy network
         visualization designed for the Gephi software.
+
+        Parameters
+        ----------
+        Dis : n x n array-like
+            Dis[i, j] is the scalar distance between i and j
+
+        Δ_unit : n x n x dim array-like
+            Δ_unit[i, j] is the unit vector pointing from i to j
+
+        Pos : n x dim array-like
+            Pos[i] is the position of node i
         """
         Dis_center = np.linalg.norm(Pos, axis=1)
         Dis_center = np.where(Dis_center < 0.01, 0.01, Dis_center)
-        f_gra = Hub[0] * Dis_center.reshape(1, nnodes)**g
+        f_gra = Hub[0] * Dis_center**g
         f_gra = f_gra.reshape(nnodes, 1) * Pos / Dis_center.reshape(nnodes, 1)
 
         f_rep = k * Deg / Dis
-        f_rep = f_rep.reshape((nnodes, nnodes, 1)) * Δ_unit
+        f_rep = f_rep.reshape(nnodes, nnodes, 1) * Δ_unit
 
         if log_attraction:
             f_att = np.log(Dis) * W
@@ -631,6 +645,7 @@ def force_atlas_2_layout(G, k=None,
                             center, dim, displacement_min)
     if fixed is None:
         Pos = nx.rescale_layout(Pos, scale=scale) + center
+        # TODO: document the issue when fixed and scale are specified together
     pos = dict(zip(G, Pos))
     return pos
 
@@ -703,13 +718,13 @@ def spat_fruchterman_reingold_layout(G, k=None,
     """
     import numpy as np
 
-    G, center = _process_params(G, center, dim)
+    G, center = _process_params(G, center, dim)  # Décaler ?
 
-    if iterations == 0:
-        iterations = np.inf
+    if iterations == 0: 
+        iterations = np.inf  # Décaler ?
 
     M = np.array([[1] if not fixed or node not in fixed else [0]
-                  for node in G])
+                  for node in G])  # Décaler ?
 
     shape = (len(G), dim)
     if pos:
@@ -720,19 +735,19 @@ def spat_fruchterman_reingold_layout(G, k=None,
             if n in pos:
                 Pos[i] = np.asarray(pos[n])
     else:
-        Pos = np.random.random(shape) + center
+        Pos = np.random.random(shape) + center  # Décaler la spatialisation initiale
 
-    if len(G) == 0:
+    if len(G) == 0:  # FIXME: Décaler
         return {}
     if len(G) == 1:
         return {next(G.nodes()): center}
 
-    W = np.asarray(nx.to_numpy_matrix(G, weight=weight))
+    W = np.asarray(nx.to_numpy_matrix(G, weight=weight))  # Ne pas décaler ?
 
-    A = np.where(W, 1, 0)
+    A = np.where(W, 1, 0)  # Ne pas décaler ?
     nnodes, _ = A.shape
 
-    if k is None:
+    if k is None:  # Ne pas décaler ! (algo-dépendant)
         if fixed is not None:
             # We must adjust k by domain size for layouts not near 1x1
             k = dom_size / np.sqrt(nnodes)
@@ -748,7 +763,7 @@ def spat_fruchterman_reingold_layout(G, k=None,
 
     pos = nx.spatialization(A, fruchterman_reingold, Pos, M, iterations, scale,
                             center, dim, displacement_min)
-    if fixed is None:
+    if fixed is None:  # Décaler et documenter (scale et fixed en même temps ?)
         pos = nx.rescale_layout(pos, scale=scale) + center
     pos = dict(zip(G, pos))
     return pos
@@ -805,7 +820,7 @@ def spatialization(A,
         The default of one pixel makes a lot of sense. Values < 1 will lead to
         much slower convergence.
     """
-
+    # TODO: Make the distance a functional parameter
     try:
         import numpy as np
     except ImportError:

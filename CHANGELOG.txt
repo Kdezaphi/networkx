@@ -1,0 +1,5 @@
+- Quid de quand fixed et scale sont spécifiés en même temps.
+- Que se passe-t-il quand on a tous les noeuds à l'origine: On randomize dans [0,0]x[0,0], c'est tout pourri
+- Mettre un deprecation warning dans le fruchterman_reingold
+- préciser qu'on fera le sparse dès qu'ils auront mergé le normal
+- Vérifier la tête de la doc: Il faut que l'algo soit documenté parfaitement une fois seulement, et les autres fonctions documentent les spécificités de l'algo en question (e.g. FA2) et lient vers l'explication globale des autres paramètres.

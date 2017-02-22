@@ -281,6 +281,11 @@ def fruchterman_reingold_layout(G, k=None,
     >>> pos = nx.fruchterman_reingold_layout(G)
     """
     import numpy as np
+    import warnings
+
+    warnings.warn('''fruchterman_reingold_layout is replaced by
+                   spat_fruchterman_reingold_layout or spring_layout''',
+                   PendingDeprecationWarning)
 
     G, center = _process_params(G, center, dim)
 
@@ -326,9 +331,6 @@ def fruchterman_reingold_layout(G, k=None,
         pos = rescale_layout(pos, scale=scale) + center
     pos = dict(zip(G, pos))
     return pos
-
-
-spring_layout = fruchterman_reingold_layout
 
 
 def _fruchterman_reingold(A, k=None, pos=None, fixed=None,
@@ -545,6 +547,10 @@ def force_atlas_2_layout(G, k=None,
         The default of one pixel makes a lot of sense. Values < 1 will lead to
         much slower convergence.
 
+    distance : function  optional (default=None)
+        Function that take an n x n x dim array and return an n x n
+        array that corresponding to the distance between nodes.
+
     Returns
     -------
     pos : dict
@@ -555,47 +561,29 @@ def force_atlas_2_layout(G, k=None,
     FIXME: Regarder les tests ailleurs
     >>> G = nx.path_graph(4)
     >>> pos = nx.force_atlas_2_layout(G)
+
+    See also
+    --------
+    spat_fruchterman_reingold_layout
+    spatialization
     """
     import numpy as np
 
-    G, center = _process_params(G, center, dim)
-
-    if iterations == 0:
-        iterations = np.inf
-
     W = np.asarray(nx.to_numpy_matrix(G, weight=weight))**edge_weight_influence
-
     A = np.where(W, 1, 0)
     nnodes, _ = A.shape
 
-    shape = (len(G), dim)
-    if pos:
-        # Determine size of existing domain to adjust initial positions
-        # TODO: use in all force-directed layouts
-        dom_size = max(coord for pos_tup in pos.values() for coord in pos_tup)
-        Pos = np.random.random(shape) * dom_size + center
-        for i, n in enumerate(G):
-            if n in pos:
-                Pos[i] = np.asarray(pos[n])
-    else:
-        Pos = np.random.random(shape) + center
-
-    if len(G) == 0:
+    if nnodes == 0:
         return {}
-    if len(G) == 1:
-        return {next(G.nodes()): center}
 
     if not k:
-        # Default values inspired from Force Atlas' Java implementation
+        # Default values inspired from Force Atlas 2 Java implementation
         k = 2 if nnodes > 100 else 10
 
     if len(G) > 5000:
         raise NotImplementedError("Sparse matrix Force Atlas 2 is not implemented yet")
 
     ones = np.ones((nnodes, 1))
-
-    M = np.array([[1] if not fixed or node not in fixed else [0]
-                  for node in G])
 
     # ∀ x, Hub[i, x] is the 1 + the number of outgoing edges from node i
     Hub = np.matmul((1 + np.sum(A, axis=1)).reshape((nnodes, 1)), ones.T)
@@ -641,11 +629,8 @@ def force_atlas_2_layout(G, k=None,
 
         return np.sum(f_att - f_rep, axis=1) - f_gra
 
-    Pos = nx.spatialization(A, force_atlas_2, Pos, M, iterations, scale,
+    Pos = nx.spatialization(G, force_atlas_2, pos, fixed, iterations, scale,
                             center, dim, displacement_min)
-    if fixed is None:
-        Pos = nx.rescale_layout(Pos, scale=scale) + center
-        # TODO: document the issue when fixed and scale are specified together
     pos = dict(zip(G, Pos))
     return pos
 
@@ -654,11 +639,12 @@ def spat_fruchterman_reingold_layout(G, k=None,
                                      pos=None,
                                      fixed=None,
                                      iterations=0,
-                                     displacement_min=1,
                                      weight='weight',
                                      scale=1.0,
                                      center=None,
-                                     dim=2):
+                                     dim=2,
+                                     displacement_min=1,
+                                     distance=None):
     """Position nodes using Fruchterman-Reingold force-directed algorithm.
 
     Parameters
@@ -679,13 +665,11 @@ def spat_fruchterman_reingold_layout(G, k=None,
         Nodes to keep fixed at initial position.
 
     iterations : int  optional (default=0)
-        Number of maximum iterations. The algorithm stop when the
+        Number of maximum iterations. The algorithm stops when the
         maximum displacement is under displacement_min or when the
-        number of iterations is reach. If it is 0 it is set to np.inf.
-
-    displacement_min : float  optional (default=0.1)
-        Scalar to set the minimum displacement of the maximum displacement
-        to stop the algorithm.
+        number of iterations is reached. If it is 0, then there is no
+        limit on the number of iterations. The algorithm is guaranteed
+        to converge if displacement_min>0.
 
     weight : string or None   optional (default='weight')
         The edge attribute that holds the numerical value used for
@@ -698,10 +682,18 @@ def spat_fruchterman_reingold_layout(G, k=None,
     center : array-like or None
         Coordinate pair around which to center the layout.
 
-    dim : int
+    dim : int  optional (default=2)
         Dimension of layout
 
-    fast : boolean  optional (default=True)
+    displacement_min : float  optional (default=1)
+        The algorithm stops if an iteration would make the node that moves the most
+        move less than displacement_min.
+        The default of one pixel makes a lot of sense. Values < 1 will lead to
+        much slower convergence.
+
+    distance : function  optional (default=None)
+        Function that take an n x n x dim array and return an n x n
+        array that corresponding to the distance between nodes.
 
     Returns
     -------
@@ -715,87 +707,87 @@ def spat_fruchterman_reingold_layout(G, k=None,
 
     # The same using longer but equivalent function name
     >>> pos = nx.fruchterman_reingold_layout(G)
+
+    See also
+    --------
+    force_atlas_2_layout
+    spatialization
     """
     import numpy as np
 
-    G, center = _process_params(G, center, dim)  # Décaler ?
-
-    if iterations == 0: 
-        iterations = np.inf  # Décaler ?
-
-    M = np.array([[1] if not fixed or node not in fixed else [0]
-                  for node in G])  # Décaler ?
-
-    shape = (len(G), dim)
-    if pos:
-        # Determine size of existing domain to adjust initial positions
-        dom_size = max(coord for pos_tup in pos.values() for coord in pos_tup)
-        Pos = np.random.random(shape) * dom_size + center
-        for i, n in enumerate(G):
-            if n in pos:
-                Pos[i] = np.asarray(pos[n])
-    else:
-        Pos = np.random.random(shape) + center  # Décaler la spatialisation initiale
-
-    if len(G) == 0:  # FIXME: Décaler
+    if len(G) == 0:
         return {}
-    if len(G) == 1:
-        return {next(G.nodes()): center}
 
-    W = np.asarray(nx.to_numpy_matrix(G, weight=weight))  # Ne pas décaler ?
-
-    A = np.where(W, 1, 0)  # Ne pas décaler ?
-    nnodes, _ = A.shape
-
-    if k is None:  # Ne pas décaler ! (algo-dépendant)
-        if fixed is not None:
+    try:
+        # Sparse matrix
+        if len(G) < 500:  # sparse solver for large graphs
+            raise ValueError
+        A = nx.to_scipy_sparse_matrix(G, weight=weight, dtype='f')
+        if k is None and fixed is not None:
             # We must adjust k by domain size for layouts not near 1x1
+            nnodes, _ = A.shape
             k = dom_size / np.sqrt(nnodes)
-        else:
-            k = np.sqrt(1.0/nnodes)
+        pos = _sparse_fruchterman_reingold(A, k, pos_arr, fixed,
+                                           iterations, dim)
+        if fixed is not None:
+            pos = rescale_layout(pos, scale=scale) + center
+    except:
+        W = np.asarray(nx.to_numpy_matrix(G, weight=weight))
+        A = np.where(W, 1, 0)
+        nnodes, _ = A.shape
 
-    def fruchterman_reingold(Dis, Δ_unit, Pos):
-        f_rep = (k * k / Dis**2).reshape((nnodes, nnodes, 1)) * Δ_unit
+        if k is None:
+            if fixed is not None:
+                dom_size = max(coord for pos_tup in pos.values()
+                               for coord in pos_tup)
+                # We must adjust k by domain size for layouts not near 1x1
+                k = dom_size / np.sqrt(nnodes)
+            else:
+                k = np.sqrt(1.0/nnodes)
 
-        f_att = (W * Dis / k).reshape((nnodes, nnodes, 1)) * Δ_unit
+        def fruchterman_reingold(Dis, Δ_unit, Pos):
+            f_rep = (k * k / Dis**2).reshape((nnodes, nnodes, 1)) * Δ_unit
 
-        return np.sum(f_att, axis=1) - np.sum(f_rep, axis=1)
+            f_att = (W * Dis / k).reshape((nnodes, nnodes, 1)) * Δ_unit
 
-    pos = nx.spatialization(A, fruchterman_reingold, Pos, M, iterations, scale,
-                            center, dim, displacement_min)
-    if fixed is None:  # Décaler et documenter (scale et fixed en même temps ?)
-        pos = nx.rescale_layout(pos, scale=scale) + center
+            return np.sum(f_att, axis=1) - np.sum(f_rep, axis=1)
+
+        pos = nx.spatialization(G, fruchterman_reingold, pos, fixed,
+                                iterations, scale, center, dim,
+                                displacement_min, distance)
+
     pos = dict(zip(G, pos))
     return pos
 
 
-def spatialization(A,
-                   get_displacement,
-                   Pos=None,
-                   M=None,
+spring_layout = spat_fruchterman_reingold_layout
+
+
+def spatialization(G, get_displacement,
+                   pos=None,
+                   fixed=None,
                    iterations=0,
                    scale=1.0,
                    center=None,
                    dim=2,
-                   displacement_min=1):
-    """Run a generic force-directed algorithm on the graph defined by A and Pos.
+                   displacement_min=1,
+                   distance=None):
+    """Position nodes using a given force-directed algorithm on the graph G.
 
-    A : array-like
-        Adjacency matrix of a graph.
+    G : NetworkX graph or list of nodes
 
     get_displacement : function
         Function to compute the displacement for one iteration with the
         matrix of position, distance between nodes and unit distance
         among each dimension.
 
-    Pos : array-like optional (default=None)
-        Position matrix of the nodes, must have the same number of row as A and
-        the same number of columns as dim. If None, initialized with
-        random positions.
+    pos : dict or None  optional (default=None)
+        Initial positions for nodes as a dictionary with node as keys
+        and values as a coordinate list or tuple.  If None, then use
+        random initial positions.
 
-    M : array-like  optional (default=None)
-        Column vector to describe if the nodes or fixed (0) or movable (1).
-        If None all nodes are movable.
+    fixed : list or None  optional (default=None)
+        Nodes to keep fixed at initial position.
 
     iterations : int  optional (default=0)
         Number of maximum iterations. The algorithm stops when the
@@ -819,6 +811,20 @@ def spatialization(A,
         move less than displacement_min.
         The default of one pixel makes a lot of sense. Values < 1 will lead to
         much slower convergence.
+
+    distance : function  optional (default=None)
+        Function that take an n x n x dim array and return an n x n
+        array that corresponding to the distance between nodes.
+
+    Returns
+    -------
+    pos : n x dim array-like
+        An array of positions of nodes.
+
+    See also
+    --------
+    force_atlas_2_layout
+    spat_fruchterman_reingold_layout
     """
     # TODO: Make the distance a functional parameter
     try:
@@ -827,35 +833,33 @@ def spatialization(A,
         msg = "spacialization() requires numpy: http://scipy.org/ "
         raise ImportError(msg)
 
-    try:
-        nnodes, _ = A.shape
-    except AttributeError:
-        msg = "spacialization() takes an adjacency matrix as input"
-        raise nx.NetworkXError(msg)
+    G, center = _process_params(G, center, dim)
 
-    if Pos is None:
-        Pos = np.random.rand(nnodes, dim)
-    elif (nnodes, dim) != Pos.shape:
-        msg = "shape Pos " + str(Pos.shape) + " is not (" + str(nnodes) +\
-            ", " + str(dim) + ")."
-        raise ValueError(msg)
+    if iterations == 0:
+        iterations = np.inf
+
+    nnodes = len(G)
+
+    shape = (nnodes, dim)
+    if pos:
+        # Determine size of existing domain to adjust initial positions
+        dom_size = max(coord for pos_tup in pos.values() for coord in pos_tup)
+        Pos = np.random.random(shape) * dom_size + center
+        for i, n in enumerate(G):
+            if n in pos:
+                Pos[i] = np.asarray(pos[n])
+    else:
+        Pos = np.random.random(shape) + center
+
+    if nnodes == 0:
+        return None
+    if nnodes == 1:
+        return [center]
 
     ones = np.ones((nnodes, 1))
 
-    if M is None:
-        M = ones
-    elif (nnodes, 1) != M.shape:
-        msg = "shape M " + str(Pos.shape) + " is not (" + str(nnodes) + ", 1)."
-        raise ValueError(msg)
-
-    if center is None:
-        center = np.zeros(dim)
-    else:
-        center = np.asarray(center)
-
-    if len(center) != dim:
-        msg = "length of center coordinates must match dimension of layout"
-        raise ValueError(msg)
+    M = np.array([[1] if not fixed or node not in fixed else [0]
+                  for node in G])
 
     Q_improve = True
     Q = np.inf
@@ -867,7 +871,10 @@ def spatialization(A,
             Δ = np.dstack([np.matmul(ones, Pos[:,i].T.reshape(1, nnodes)) -
                            np.matmul(Pos[:,i].reshape(nnodes, 1), ones.T)
                            for i in range(dim)])
-            Dis = np.linalg.norm(Δ, axis=2)
+            if distance is None:
+                Dis = np.linalg.norm(Δ, axis=2)
+            else:
+                Dis = distance(Δ)
             Dis = np.where(Dis < 0.01, 0.01, Dis)
             Δ_unit = Δ / Dis.reshape((nnodes, nnodes, 1))
             δ = get_displacement(Dis, Δ_unit, Pos) * M
@@ -876,7 +883,10 @@ def spatialization(A,
         Δ_2 = np.dstack([np.matmul(ones, Pos_2[:,i].T.reshape(1, nnodes)) -
                          np.matmul(Pos_2[:,i].reshape(nnodes, 1), ones.T)
                          for i in range(dim)])
-        Dis_2 = np.linalg.norm(Δ_2, axis=2)
+        if distance is None:
+            Dis_2 = np.linalg.norm(Δ_2, axis=2)
+        else:
+            Dis_2 = distance(Δ_2)
         Dis_2 = np.where(Dis_2 < 0.01, 0.01, Dis_2)
         Δ_unit_2 = Δ_2 / Dis_2.reshape((nnodes, nnodes, 1))
         δ_2 = get_displacement(Dis_2, Δ_unit_2, Pos_2) * M
@@ -884,8 +894,6 @@ def spatialization(A,
         if Q != np.inf:
             α = α * Q / Q_2
         if Q_2 < Q:
-            if Q != np.inf and Q_2 != np.inf:
-                α = α * Q / Q_2
             Q = Q_2
             Q_improve = True
             Pos = Pos_2
@@ -893,8 +901,8 @@ def spatialization(A,
             α /= 2
         if max(map(np.max, map(np.abs, δ * α))) <= displacement_min:
             break
-    if nnodes == 1:
-        Pos = np.array([center], dtype=np.float64)
+    if fixed is None:
+        Pos = nx.rescale_layout(Pos, scale=scale) + center
     return Pos
 
 

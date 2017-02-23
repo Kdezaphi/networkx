@@ -548,7 +548,7 @@ def force_atlas_2_layout(G, k=None,
         much slower convergence.
 
     distance : function  optional (default=None)
-        Function that take an n x n x dim array and return an n x n
+        Function that take an M x dim array and return an M
         array that corresponding to the distance between nodes.
 
     Returns
@@ -591,7 +591,7 @@ def force_atlas_2_layout(G, k=None,
     # Force Atlas 2. It has the nice property of never being 0.
     Deg = Hub * np.matmul(ones, (1 + np.sum(A, axis=0)).reshape((1, nnodes)))
 
-    def force_atlas_2(Dis, Δ_unit, Pos):
+    def force_atlas_2(Dis, Δ_unit, Pos, distance):
         """Return the n x dim displacement vector for Force Atlas 2.
 
         The forces are computed according to the paper
@@ -610,8 +610,15 @@ def force_atlas_2_layout(G, k=None,
 
         Pos : n x dim array-like
             Pos[i] is the position of node i
+
+        distance : function  optional (default=None)
+            Function that take an M x dim array and return an M
+            array that corresponding to the distance between nodes.
         """
-        Dis_center = np.linalg.norm(Pos, axis=1)
+        if distance is None:
+            Dis_center = np.linalg.norm(Pos, axis=-1)
+        else:
+            Dis_center = distance(Pos)
         Dis_center = np.where(Dis_center < 0.01, 0.01, Dis_center)
         f_gra = Hub[0] * Dis_center**g
         f_gra = f_gra.reshape(nnodes, 1) * Pos / Dis_center.reshape(nnodes, 1)
@@ -745,7 +752,29 @@ def spat_fruchterman_reingold_layout(G, k=None,
             else:
                 k = np.sqrt(1.0/nnodes)
 
-        def fruchterman_reingold(Dis, Δ_unit, Pos):
+        def fruchterman_reingold(Dis, Δ_unit, Pos, distance):
+            """Return the n x dim displacement vector for Force Atlas 2.
+
+            The forces are computed according to the paper
+
+            Thomas M. J. Fruchterman AND Edward M. Reingold (1991)
+            Graph Drawing by Force-directed Placement
+
+            Parameters
+            ----------
+            Dis : n x n array-like
+                Dis[i, j] is the scalar distance between i and j
+
+            Δ_unit : n x n x dim array-like
+                Δ_unit[i, j] is the unit vector pointing from i to j
+
+            Pos : n x dim array-like
+                Pos[i] is the position of node i
+
+            distance : function  optional (default=None)
+                Function that take an M x dim array and return an M
+                array that corresponding to the distance between nodes.
+            """
             f_rep = (k * k / Dis**2).reshape((nnodes, nnodes, 1)) * Δ_unit
 
             f_att = (W * Dis / k).reshape((nnodes, nnodes, 1)) * Δ_unit
@@ -872,24 +901,24 @@ def spatialization(G, get_displacement,
                            np.matmul(Pos[:,i].reshape(nnodes, 1), ones.T)
                            for i in range(dim)])
             if distance is None:
-                Dis = np.linalg.norm(Δ, axis=2)
+                Dis = np.linalg.norm(Δ, axis=-1)
             else:
                 Dis = distance(Δ)
             Dis = np.where(Dis < 0.01, 0.01, Dis)
             Δ_unit = Δ / Dis.reshape((nnodes, nnodes, 1))
-            δ = get_displacement(Dis, Δ_unit, Pos) * M
+            δ = get_displacement(Dis, Δ_unit, Pos, distance) * M
             Q_improve = False
         Pos_2 = Pos + δ * α
         Δ_2 = np.dstack([np.matmul(ones, Pos_2[:,i].T.reshape(1, nnodes)) -
                          np.matmul(Pos_2[:,i].reshape(nnodes, 1), ones.T)
                          for i in range(dim)])
         if distance is None:
-            Dis_2 = np.linalg.norm(Δ_2, axis=2)
+            Dis_2 = np.linalg.norm(Δ_2, axis=-1)
         else:
             Dis_2 = distance(Δ_2)
         Dis_2 = np.where(Dis_2 < 0.01, 0.01, Dis_2)
         Δ_unit_2 = Δ_2 / Dis_2.reshape((nnodes, nnodes, 1))
-        δ_2 = get_displacement(Dis_2, Δ_unit_2, Pos_2) * M
+        δ_2 = get_displacement(Dis_2, Δ_unit_2, Pos_2, distance) * M
         Q_2 = np.sum(np.linalg.norm(δ_2)) / nnodes
         if Q != np.inf:
             α = α * Q / Q_2
@@ -901,6 +930,7 @@ def spatialization(G, get_displacement,
             α /= 2
         if max(map(np.max, map(np.abs, δ * α))) <= displacement_min:
             break
+    print('total iterations: ' + str(i))
     if fixed is None:
         Pos = nx.rescale_layout(Pos, scale=scale) + center
     return Pos

@@ -36,8 +36,8 @@ __all__ = ['circular_layout',
            'spectral_layout',
            'fruchterman_reingold_layout',
            'force_atlas_2_layout',
-           'spat_fruchterman_reingold_layout',
-           'spatialization']
+           'generalized_fruchterman_reingold_layout',
+           'force_directed']
 
 
 def _process_params(G, center, dim):
@@ -275,16 +275,13 @@ def fruchterman_reingold_layout(G, k=None,
     Examples
     --------
     >>> G = nx.path_graph(4)
-    >>> pos = nx.spring_layout(G)
-
-    # The same using longer but equivalent function name
     >>> pos = nx.fruchterman_reingold_layout(G)
     """
     import numpy as np
     import warnings
 
     warnings.warn('''fruchterman_reingold_layout is replaced by
-                   spat_fruchterman_reingold_layout or spring_layout''',
+                   generalized_fruchterman_reingold_layout or spring_layout''',
                    PendingDeprecationWarning)
 
     G, center = _process_params(G, center, dim)
@@ -485,8 +482,9 @@ def force_atlas_2_layout(G, k=None,
                          edge_weight_influence=1,
                          log_attraction=False,
                          dissuade_hubs=False,
-                         displacement_min=1):
-    """Position nodes using Force Atlas 2 force-directed algorithm.
+                         displacement_min=1,
+                         distance=None):
+    """Position nodes using the Force Atlas 2 force-directed algorithm.
 
     Parameters
     ----------
@@ -542,14 +540,16 @@ def force_atlas_2_layout(G, k=None,
         Divide the attraction by the number of outgoing links plus one.
 
     displacement_min : float  optional (default=1)
-        The algorithm stops if an iteration would make the node that moves the most
-        move less than displacement_min.
+        The algorithm stops if an iteration would make the node that moves the
+        most move less than displacement_min.
         The default of one pixel makes a lot of sense. Values < 1 will lead to
         much slower convergence.
 
     distance : function  optional (default=None)
-        Function that take an M x dim array and return an M
-        array that corresponding to the distance between nodes.
+        Function that take an _ x dim array of deltas between
+        coordinates and return the _ array of the scalar distances
+        corresponding to those deltas.
+        Defaults to lambda x: np.linalg.norm(x, axis=-1) if None.
 
     Returns
     -------
@@ -564,10 +564,12 @@ def force_atlas_2_layout(G, k=None,
 
     See also
     --------
-    spat_fruchterman_reingold_layout
-    spatialization
+    generalized_fruchterman_reingold_layout
+    force_directed  # FIXME: Changer les noms des fonctions
     """
     import numpy as np
+
+    G, center = _process_params(G, center, dim)
 
     W = np.asarray(nx.to_numpy_matrix(G, weight=weight))**edge_weight_influence
     A = np.where(W, 1, 0)
@@ -581,17 +583,18 @@ def force_atlas_2_layout(G, k=None,
         k = 2 if nnodes > 100 else 10
 
     if len(G) > 5000:
-        raise NotImplementedError("Sparse matrix Force Atlas 2 is not implemented yet")
+        raise NotImplementedError("Sparse matrix Force Atlas 2 is not "
+                                  "implemented yet")
 
     ones = np.ones((nnodes, 1))
 
-    # ∀ x, Hub[i, x] is the 1 + the number of outgoing edges from node i
+    # ∀ x, Hub[i, x] is 1 + the number of outgoing edges from node i
     Hub = np.matmul((1 + np.sum(A, axis=1)).reshape((nnodes, 1)), ones.T)
     # Hub times 1 + the number of incoming edges is used as the degree in
     # Force Atlas 2. It has the nice property of never being 0.
     Deg = Hub * np.matmul(ones, (1 + np.sum(A, axis=0)).reshape((1, nnodes)))
 
-    def force_atlas_2(Dis, Δ_unit, Pos, distance):
+    def force_atlas_2(Dis, Δ_unit, Pos, distance=None):
         """Return the n x dim displacement vector for Force Atlas 2.
 
         The forces are computed according to the paper
@@ -612,8 +615,10 @@ def force_atlas_2_layout(G, k=None,
             Pos[i] is the position of node i
 
         distance : function  optional (default=None)
-            Function that take an M x dim array and return an M
-            array that corresponding to the distance between nodes.
+            Function that take an _ x dim array of deltas between
+            coordinates and return the _ array of the scalar distances
+            corresponding to those deltas.
+            Defaults to lambda x: np.linalg.norm(x, axis=-1) if None.
         """
         if distance is None:
             Dis_center = np.linalg.norm(Pos, axis=-1)
@@ -636,22 +641,22 @@ def force_atlas_2_layout(G, k=None,
 
         return np.sum(f_att - f_rep, axis=1) - f_gra
 
-    Pos = nx.spatialization(G, force_atlas_2, pos, fixed, iterations, scale,
+    Pos = nx.force_directed(G, force_atlas_2, pos, fixed, iterations, scale,
                             center, dim, displacement_min)
     pos = dict(zip(G, Pos))
     return pos
 
 
-def spat_fruchterman_reingold_layout(G, k=None,
-                                     pos=None,
-                                     fixed=None,
-                                     iterations=0,
-                                     weight='weight',
-                                     scale=1.0,
-                                     center=None,
-                                     dim=2,
-                                     displacement_min=1,
-                                     distance=None):
+def generalized_fruchterman_reingold_layout(G, k=None,
+                                            pos=None,
+                                            fixed=None,
+                                            iterations=0,
+                                            weight='weight',
+                                            scale=1.0,
+                                            center=None,
+                                            dim=2,
+                                            displacement_min=1,
+                                            distance=None):
     """Position nodes using Fruchterman-Reingold force-directed algorithm.
 
     Parameters
@@ -699,8 +704,10 @@ def spat_fruchterman_reingold_layout(G, k=None,
         much slower convergence.
 
     distance : function  optional (default=None)
-        Function that take an n x n x dim array and return an n x n
-        array that corresponding to the distance between nodes.
+        Function that take an n x n x dim array of deltas between
+        coordinates and return the n x n array of the scalar distances
+        corresponding to those deltas.
+        Defaults to lambda x: np.linalg.norm(x, axis=-1) if None.
 
     Returns
     -------
@@ -713,86 +720,75 @@ def spat_fruchterman_reingold_layout(G, k=None,
     >>> pos = nx.spring_layout(G)
 
     # The same using longer but equivalent function name
-    >>> pos = nx.fruchterman_reingold_layout(G)
+    >>> pos = nx.generalized_fruchterman_reingold_layout(G)
 
     See also
     --------
     force_atlas_2_layout
-    spatialization
+    force_directed
     """
     import numpy as np
 
     if len(G) == 0:
         return {}
+    elif len(G) >= 500:  # Using old implementation, which will call the
+        # "sparse" version
+        return fruchterman_reingold_layout(G, k, pos, fixed, iterations,
+                                           weight, scale, center, dim)
 
-    try:
-        # Sparse matrix
-        if len(G) < 500:  # sparse solver for large graphs
-            raise ValueError
-        A = nx.to_scipy_sparse_matrix(G, weight=weight, dtype='f')
-        if k is None and fixed is not None:
-            # We must adjust k by domain size for layouts not near 1x1
-            nnodes, _ = A.shape
-            k = dom_size / np.sqrt(nnodes)
-        pos = _sparse_fruchterman_reingold(A, k, pos_arr, fixed,
-                                           iterations, dim)
+    W = np.asarray(nx.to_numpy_matrix(G, weight=weight))
+    A = np.where(W, 1, 0)
+    nnodes, _ = A.shape
+
+    if k is None:
         if fixed is not None:
-            pos = rescale_layout(pos, scale=scale) + center
-    except:
-        W = np.asarray(nx.to_numpy_matrix(G, weight=weight))
-        A = np.where(W, 1, 0)
-        nnodes, _ = A.shape
+            dom_size = max(coord for pos_tup in pos.values()
+                           for coord in pos_tup)
+            # We must adjust k by domain size for layouts not near 1x1
+            k = dom_size / np.sqrt(nnodes)
+        else:
+            k = np.sqrt(1.0/nnodes)
 
-        if k is None:
-            if fixed is not None:
-                dom_size = max(coord for pos_tup in pos.values()
-                               for coord in pos_tup)
-                # We must adjust k by domain size for layouts not near 1x1
-                k = dom_size / np.sqrt(nnodes)
-            else:
-                k = np.sqrt(1.0/nnodes)
+    def fruchterman_reingold(Dis, Δ_unit, Pos, _):
+        """Return the n x dim displacement vector for Fruchterman Reingold.
 
-        def fruchterman_reingold(Dis, Δ_unit, Pos, distance):
-            """Return the n x dim displacement vector for Force Atlas 2.
+        The forces are computed according to the paper
 
-            The forces are computed according to the paper
+        Thomas M. J. Fruchterman AND Edward M. Reingold (1991)
+        Graph Drawing by Force-directed Placement
 
-            Thomas M. J. Fruchterman AND Edward M. Reingold (1991)
-            Graph Drawing by Force-directed Placement
+        Parameters
+        ----------
+        Dis : n x n array-like
+            Dis[i, j] is the scalar distance between i and j
 
-            Parameters
-            ----------
-            Dis : n x n array-like
-                Dis[i, j] is the scalar distance between i and j
+        Δ_unit : n x n x dim array-like
+            Δ_unit[i, j] is the unit vector pointing from i to j
 
-            Δ_unit : n x n x dim array-like
-                Δ_unit[i, j] is the unit vector pointing from i to j
+        Pos : n x dim array-like
+            Pos[i] is the position of node i
 
-            Pos : n x dim array-like
-                Pos[i] is the position of node i
+        _ : Some algos (e.g. Force Atlas 2) need to know the distance
+            function, we dont.
+        """
+        f_rep = (k * k / Dis**2).reshape((nnodes, nnodes, 1)) * Δ_unit
 
-            distance : function  optional (default=None)
-                Function that take an M x dim array and return an M
-                array that corresponding to the distance between nodes.
-            """
-            f_rep = (k * k / Dis**2).reshape((nnodes, nnodes, 1)) * Δ_unit
+        f_att = (W * Dis / k).reshape((nnodes, nnodes, 1)) * Δ_unit
 
-            f_att = (W * Dis / k).reshape((nnodes, nnodes, 1)) * Δ_unit
+        return np.sum(f_att - f_rep, axis=1)
 
-            return np.sum(f_att, axis=1) - np.sum(f_rep, axis=1)
-
-        pos = nx.spatialization(G, fruchterman_reingold, pos, fixed,
-                                iterations, scale, center, dim,
-                                displacement_min, distance)
+    pos = nx.force_directed(G, fruchterman_reingold, pos, fixed,
+                            iterations, scale, center, dim,
+                            displacement_min, distance)
 
     pos = dict(zip(G, pos))
     return pos
 
 
-spring_layout = spat_fruchterman_reingold_layout
+spring_layout = generalized_fruchterman_reingold_layout
 
 
-def spatialization(G, get_displacement,
+def force_directed(G, get_displacement,
                    pos=None,
                    fixed=None,
                    iterations=0,
@@ -801,14 +797,24 @@ def spatialization(G, get_displacement,
                    dim=2,
                    displacement_min=1,
                    distance=None):
-    """Position nodes using a given force-directed algorithm on the graph G.
+    """Run a force-directed algorithm on G, using the given set of forces.
 
     G : NetworkX graph or list of nodes
 
-    get_displacement : function
-        Function to compute the displacement for one iteration with the
-        matrix of position, distance between nodes and unit distance
-        among each dimension.
+    get_displacement : function of Dis, Δ_unit, Pos, distance, where:
+        - Dis is a n x n array-like, Dis[i, j] is the scalar distance
+          between node i and node j,
+        - Δ_unit: n x n x dim array-like, Δ_unit[i, j] is the unit vector
+          pointing from i to j,
+        - Pos: n x dim array-like, Pos[i] is the position of i,
+        - distance: function  that take an _ x dim array of deltas between
+            coordinates and return the _ array of the scalar distances
+            corresponding to those deltas.
+
+        get_displacement computes the displacement for one iteration from
+        its arguments by computing and summing the forces. See for example
+        :py:func:`networkx.layout.force_atlas_2_layout.force_atlas2` or
+        :py:func:`networkx.layout.generalized_fruchterman_reingold_layout.fruchterman_reingold`.
 
     pos : dict or None  optional (default=None)
         Initial positions for nodes as a dictionary with node as keys
@@ -842,8 +848,10 @@ def spatialization(G, get_displacement,
         much slower convergence.
 
     distance : function  optional (default=None)
-        Function that take an n x n x dim array and return an n x n
-        array that corresponding to the distance between nodes.
+        Function that take an n x n x dim array of deltas between
+        coordinates and return the n x n array of the scalar distances
+        corresponding to those deltas.
+        Defaults to lambda x: np.linalg.norm(x, axis=-1) if None.
 
     Returns
     -------
@@ -853,13 +861,12 @@ def spatialization(G, get_displacement,
     See also
     --------
     force_atlas_2_layout
-    spat_fruchterman_reingold_layout
+    generalized_fruchterman_reingold_layout
     """
-    # TODO: Make the distance a functional parameter
     try:
         import numpy as np
     except ImportError:
-        msg = "spacialization() requires numpy: http://scipy.org/ "
+        msg = "force_directed() requires numpy: http://scipy.org/ "
         raise ImportError(msg)
 
     G, center = _process_params(G, center, dim)
@@ -885,52 +892,74 @@ def spatialization(G, get_displacement,
     if nnodes == 1:
         return [center]
 
+    if distance is None:
+        def distance(x):
+            '''Take an n x n x dim array of deltas between
+            coordinates and return the n x n array of the scalar distances
+            corresponding to those deltas.'''
+            return np.linalg.norm(x, axis=-1)
+
+    def deltas(Pos):
+        '''Return the n x n array Δ of dim-dimensional vectors between nodes.
+
+        Δ[i, j, k] is the delta along dimension k between nodes i and j,
+        therefore:
+        - Δ[i, j k] == - Δ[j, i, k],
+        - Pos[i] + Δ[i, j] == Pos[j]
+        - and distance bewteen i and j is distance(Δ[i, j,:])
+
+        Parameters
+        -----------
+        Pos: n x dim array-like
+            The nodes' positions
+
+        Returns
+        --------
+        The n x n x dim delta array.
+        '''
+        p1_pn_in_lines = np.tensordot(ones, Pos.reshape(1, nnodes, dim), 1)
+        assert p1_pn_in_lines.shape == (nnodes, nnodes, dim),\
+            """p1_pn_in_lines is supposed to be the matrix whose lines are
+            Pos, transposed a way that leaves its dim-dimensional elements
+            (the nodes positions) untouched"""
+        # By substracting its transpose to it, we compute the deltas
+        return p1_pn_in_lines - p1_pn_in_lines.transpose(1, 0, 2)
+
     ones = np.ones((nnodes, 1))
 
     M = np.array([[1] if not fixed or node not in fixed else [0]
                   for node in G])
 
-    Q_improve = True
+    Pos_changed = True  # We only recompute δa nd Q if the positions changed
     Q = np.inf
     α = 1
     i = 0
-    while True and i < iterations:
+    while i < iterations:
         i += 1
-        if Q_improve:
-            Δ = np.dstack([np.matmul(ones, Pos[:,i].T.reshape(1, nnodes)) -
-                           np.matmul(Pos[:,i].reshape(nnodes, 1), ones.T)
-                           for i in range(dim)])
-            if distance is None:
-                Dis = np.linalg.norm(Δ, axis=-1)
-            else:
-                Dis = distance(Δ)
+        if Pos_changed:
+            Δ = deltas(Pos)
+            Dis = distance(Δ)
             Dis = np.where(Dis < 0.01, 0.01, Dis)
             Δ_unit = Δ / Dis.reshape((nnodes, nnodes, 1))
             δ = get_displacement(Dis, Δ_unit, Pos, distance) * M
-            Q_improve = False
+            Pos_changed = False
         Pos_2 = Pos + δ * α
-        Δ_2 = np.dstack([np.matmul(ones, Pos_2[:,i].T.reshape(1, nnodes)) -
-                         np.matmul(Pos_2[:,i].reshape(nnodes, 1), ones.T)
-                         for i in range(dim)])
-        if distance is None:
-            Dis_2 = np.linalg.norm(Δ_2, axis=-1)
-        else:
-            Dis_2 = distance(Δ_2)
+        Δ_2 = deltas(Pos_2)
+        Dis_2 = distance(Δ_2)
         Dis_2 = np.where(Dis_2 < 0.01, 0.01, Dis_2)
         Δ_unit_2 = Δ_2 / Dis_2.reshape((nnodes, nnodes, 1))
         δ_2 = get_displacement(Dis_2, Δ_unit_2, Pos_2, distance) * M
-        Q_2 = np.sum(np.linalg.norm(δ_2)) / nnodes
+        Q_2 = np.linalg.norm(δ_2)
         if Q != np.inf:
             α = α * Q / Q_2
         if Q_2 < Q:
             Q = Q_2
-            Q_improve = True
             Pos = Pos_2
+            Pos_changed = True
         else:
             α /= 2
         if max(map(np.max, map(np.abs, δ * α))) <= displacement_min:
             break
-    print('total iterations: ' + str(i))
     if fixed is None:
         Pos = nx.rescale_layout(Pos, scale=scale) + center
     return Pos
